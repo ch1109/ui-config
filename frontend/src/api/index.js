@@ -79,7 +79,11 @@ export const systemPromptApi = {
   update: (data) => api.put('/system-prompt', data),
   reset: () => api.post('/system-prompt/reset'),
   getDefault: () => api.get('/system-prompt/default'),
-  getStats: () => api.get('/system-prompt/stats')
+  getStats: () => api.get('/system-prompt/stats'),
+  // 获取可用模型列表
+  getModels: () => api.get('/system-prompt/models'),
+  // 更新选择的模型
+  updateModel: (model) => api.put('/system-prompt', { selected_model: model })
 }
 
 // Project API

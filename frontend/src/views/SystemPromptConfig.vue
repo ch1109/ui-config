@@ -22,6 +22,50 @@
       <div class="content-grid">
         <!-- Main Editor -->
         <div class="editor-section">
+          <!-- Model Selection Card -->
+          <div class="panel-card model-card">
+            <div class="card-header">
+              <h3>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+                </svg>
+                视觉模型选择
+              </h3>
+              <span class="model-badge" :class="selectedModel === 'glm-4.6v' ? 'badge-zhipu' : 'badge-qwen'">
+                {{ selectedModel === 'glm-4.6v' ? '智谱 AI' : '本地部署' }}
+              </span>
+            </div>
+            <div class="card-body model-selector">
+              <div class="model-options">
+                <label 
+                  v-for="model in availableModels" 
+                  :key="model.id"
+                  class="model-option"
+                  :class="{ selected: selectedModel === model.id }"
+                >
+                  <input 
+                    type="radio" 
+                    :value="model.id" 
+                    v-model="selectedModel"
+                    @change="handleModelChange"
+                    :disabled="isLoading"
+                  />
+                  <div class="model-info">
+                    <div class="model-header">
+                      <span class="model-name">{{ model.name }}</span>
+                      <span class="model-provider">{{ model.provider }}</span>
+                    </div>
+                    <p class="model-desc">{{ model.description }}</p>
+                  </div>
+                  <span class="check-icon" v-if="selectedModel === model.id">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                      <path d="M20 6L9 17l-5-5"/>
+                    </svg>
+                  </span>
+                </label>
+              </div>
+            </div>
+          </div>
           <div class="panel-card">
             <div class="card-header">
               <h3>
@@ -169,6 +213,24 @@ const originalContent = ref('')
 const isLoading = ref(false)
 const pendingNavigation = ref(null)
 
+// 模型选择状态
+const selectedModel = ref('glm-4.6v')
+const originalModel = ref('glm-4.6v')
+const availableModels = ref([
+  {
+    id: 'glm-4.6v',
+    name: 'GLM-4.6V',
+    description: '智谱 AI 视觉模型，图像理解能力强，支持中英文',
+    provider: '智谱 AI'
+  },
+  {
+    id: 'qwen2.5-vl-7b',
+    name: 'Qwen2.5-VL-7B',
+    description: '通义千问视觉模型，本地部署版本，响应速度快',
+    provider: '阿里云 / 本地部署'
+  }
+])
+
 const tipsList = [
   '明确描述期望的输出格式（JSON Schema）',
   '列出需要识别的元素类型和命名规则',
@@ -179,7 +241,10 @@ const tipsList = [
 // 计算属性
 const charCount = computed(() => promptContent.value.length)
 const isValid = computed(() => charCount.value <= maxLength)
-const hasChanges = computed(() => promptContent.value !== originalContent.value)
+const hasChanges = computed(() => 
+  promptContent.value !== originalContent.value || 
+  selectedModel.value !== originalModel.value
+)
 
 const counterClass = computed(() => ({
   warning: charCount.value > maxLength * 0.9 && charCount.value <= maxLength,
@@ -193,6 +258,18 @@ onMounted(async () => {
     const response = await systemPromptApi.getCurrent()
     promptContent.value = response.prompt_content
     originalContent.value = response.prompt_content
+    selectedModel.value = response.selected_model || 'glm-4.6v'
+    originalModel.value = response.selected_model || 'glm-4.6v'
+    
+    // 尝试加载可用模型列表
+    try {
+      const modelsResponse = await systemPromptApi.getModels()
+      if (modelsResponse.models && modelsResponse.models.length > 0) {
+        availableModels.value = modelsResponse.models
+      }
+    } catch (modelError) {
+      console.warn('Failed to load models list, using defaults:', modelError)
+    }
   } catch (error) {
     console.error('Failed to load prompt:', error)
     message.error('加载提示词失败')
@@ -200,6 +277,12 @@ onMounted(async () => {
     isLoading.value = false
   }
 })
+
+// 模型切换处理
+const handleModelChange = async () => {
+  // 模型切换后会触发 hasChanges，用户需要点击保存按钮来保存
+  message.info(`已选择 ${selectedModel.value === 'glm-4.6v' ? 'GLM-4.6V' : 'Qwen2.5-VL-7B'} 模型，请点击保存按钮确认`)
+}
 
 // 输入处理
 const handleInput = () => {
@@ -215,9 +298,11 @@ const handleSave = async () => {
   isLoading.value = true
   try {
     await systemPromptApi.update({
-      prompt_content: promptContent.value
+      prompt_content: promptContent.value,
+      selected_model: selectedModel.value
     })
     originalContent.value = promptContent.value
+    originalModel.value = selectedModel.value
     message.success('保存成功')
   } catch (error) {
     message.error(error.response?.data?.message || '保存失败')
@@ -642,6 +727,120 @@ onBeforeUnmount(() => {
   }
 }
 
+// 模型选择卡片样式
+.model-card {
+  margin-bottom: 20px;
+  
+  .card-header {
+    .model-badge {
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-weight: 500;
+      
+      &.badge-zhipu {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+      }
+      
+      &.badge-qwen {
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        color: white;
+      }
+    }
+  }
+}
+
+.model-selector {
+  padding: 16px 24px !important;
+}
+
+.model-options {
+  display: flex;
+  gap: 16px;
+}
+
+.model-option {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 20px;
+  background: var(--bg-subtle);
+  border: 2px solid var(--border-color);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  
+  input[type="radio"] {
+    display: none;
+  }
+  
+  &:hover:not(.selected) {
+    border-color: var(--primary-light);
+    background: var(--bg-elevated);
+  }
+  
+  &.selected {
+    border-color: var(--primary);
+    background: var(--primary-light);
+    
+    .model-name {
+      color: var(--primary);
+    }
+  }
+  
+  .model-info {
+    flex: 1;
+  }
+  
+  .model-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+  
+  .model-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-heading);
+  }
+  
+  .model-provider {
+    font-size: 11px;
+    padding: 2px 8px;
+    background: var(--bg-elevated);
+    border-radius: 4px;
+    color: var(--text-muted);
+  }
+  
+  .model-desc {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin: 0;
+    line-height: 1.5;
+  }
+  
+  .check-icon {
+    width: 24px;
+    height: 24px;
+    background: var(--primary);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    
+    svg {
+      width: 14px;
+      height: 14px;
+      color: white;
+    }
+  }
+}
+
 @media (max-width: 1200px) {
   .content-grid {
     grid-template-columns: 1fr;
@@ -653,6 +852,10 @@ onBeforeUnmount(() => {
     .panel-card {
       flex: 1;
     }
+  }
+  
+  .model-options {
+    flex-direction: column;
   }
 }
 </style>

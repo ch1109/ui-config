@@ -27,6 +27,12 @@ class SystemPrompt(Base):
         nullable=False,
         comment="System Prompt 内容"
     )
+    selected_model = Column(
+        String(50),
+        nullable=False,
+        default="glm-4.6v",
+        comment="选择的视觉模型: glm-4.6v 或 qwen2.5-vl-7b"
+    )
     created_at = Column(
         DateTime(timezone=True), 
         server_default=func.now(),
@@ -49,5 +55,5 @@ class SystemPrompt(Base):
     )
     
     def __repr__(self):
-        return f"<SystemPrompt(id={self.id}, key={self.prompt_key})>"
+        return f"<SystemPrompt(id={self.id}, key={self.prompt_key}, model={self.selected_model})>"
 

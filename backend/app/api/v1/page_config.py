@@ -195,12 +195,13 @@ async def trigger_ai_parse_stream(
         """流式生成器"""
         async with AsyncSessionLocal() as stream_db:
             try:
-                # 获取 System Prompt
+                # 获取 System Prompt 和选择的模型
                 prompt_service = SystemPromptService(stream_db)
                 system_prompt = await prompt_service.get_current_prompt()
+                selected_model = await prompt_service.get_selected_model()
                 
-                # 调用 VL 模型流式接口
-                vl_service = VLModelService()
+                # 调用 VL 模型流式接口 (使用选择的模型)
+                vl_service = VLModelService(selected_model=selected_model)
                 
                 async for chunk in vl_service.parse_image_stream(
                     image_url=image_url,
@@ -264,12 +265,13 @@ async def execute_parse(session_id: str, image_url: str):
             session.status = SessionStatus.PARSING.value
             await db.commit()
             
-            # 获取 System Prompt
+            # 获取 System Prompt 和选择的模型
             prompt_service = SystemPromptService(db)
             system_prompt = await prompt_service.get_current_prompt()
+            selected_model = await prompt_service.get_selected_model()
             
-            # 调用 VL 模型 (REQ-M2-004: 30秒超时)
-            vl_service = VLModelService()
+            # 调用 VL 模型 (REQ-M2-004: 30秒超时，使用选择的模型)
+            vl_service = VLModelService(selected_model=selected_model)
             
             try:
                 parse_result = await asyncio.wait_for(

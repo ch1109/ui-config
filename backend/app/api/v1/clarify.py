@@ -64,10 +64,11 @@ async def submit_clarify_response(
             detail="当前状态不支持澄清"
         )
     
-    # 获取系统提示词和 VL 服务
+    # 获取系统提示词、选择的模型和 VL 服务
     prompt_service = SystemPromptService(db)
     system_prompt = await prompt_service.get_current_prompt()
-    vl_service = VLModelService()
+    selected_model = await prompt_service.get_selected_model()
+    vl_service = VLModelService(selected_model=selected_model)
     
     # 更新澄清历史 (REQ-M3-014)
     clarify_history = session.clarify_history or []
@@ -249,10 +250,11 @@ async def chat_for_config_modification(
     if not session:
         raise SessionNotFoundError(session_id)
     
-    # 获取系统提示词和 VL 服务
+    # 获取系统提示词、选择的模型和 VL 服务
     prompt_service = SystemPromptService(db)
     system_prompt = await prompt_service.get_current_prompt()
-    vl_service = VLModelService()
+    selected_model = await prompt_service.get_selected_model()
+    vl_service = VLModelService(selected_model=selected_model)
     
     # 获取当前配置
     current_config = request.current_config or session.parse_result or {}
@@ -337,10 +339,11 @@ async def chat_for_config_modification_stream(
         """流式生成器"""
         async with AsyncSessionLocal() as stream_db:
             try:
-                # 获取系统提示词
+                # 获取系统提示词和选择的模型
                 prompt_service = SystemPromptService(stream_db)
                 system_prompt = await prompt_service.get_current_prompt()
-                vl_service = VLModelService()
+                selected_model = await prompt_service.get_selected_model()
+                vl_service = VLModelService(selected_model=selected_model)
                 
                 # 更新澄清历史
                 new_history = clarify_history + [{

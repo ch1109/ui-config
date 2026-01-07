@@ -1,7 +1,7 @@
 # app/services/vl_model_service.py
 """
 VL 模型服务封装
-支持 GLM-4V (智谱) 和 Qwen-VL (阿里云 DashScope)
+支持 GLM-4V (智谱)、Qwen-VL (阿里云 DashScope) 和 Qwen2.5-VL-7B (本地部署)
 对应需求: REQ-M2-007
 """
 
@@ -18,6 +18,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Qwen2.5-VL-7B 本地部署配置
+QWEN_LOCAL_ENDPOINT = "http://192.168.3.183:9000/vision/chat"
+QWEN_LOCAL_AUTH = "Bearer secret123"
+
 
 class VLModelService:
     """
@@ -26,28 +30,53 @@ class VLModelService:
     支持:
     - 智谱 GLM-4V (默认)
     - 阿里云 DashScope Qwen-VL
+    - Qwen2.5-VL-7B 本地部署
     
     功能: 语义级解析 - 元素识别 + 交互意图 + 业务含义推断
     """
     
-    def __init__(self):
-        self.provider = settings.VL_PROVIDER.lower()
-        self.timeout = settings.VL_TIMEOUT
+    def __init__(self, selected_model: Optional[str] = None):
+        """
+        初始化 VL 模型服务
         
-        # 根据 provider 选择配置
-        if self.provider == "zhipu":
+        Args:
+            selected_model: 指定使用的模型，可选值: "glm-4.6v", "qwen2.5-vl-7b"
+                           如果为 None，则使用环境变量配置的默认模型
+        """
+        self.timeout = settings.VL_TIMEOUT
+        self.selected_model = selected_model
+        
+        # 如果指定了模型，优先使用指定的模型
+        if selected_model == "qwen2.5-vl-7b":
+            self.provider = "qwen_local"
+            self.api_key = QWEN_LOCAL_AUTH
+            self.model_name = "qwen2.5-vl-7b"
+            self.api_endpoint = QWEN_LOCAL_ENDPOINT
+        elif selected_model == "glm-4.6v":
+            self.provider = "zhipu"
             self.api_key = settings.ZHIPU_API_KEY
             self.model_name = settings.ZHIPU_MODEL_NAME
             self.api_endpoint = settings.ZHIPU_API_ENDPOINT
-        elif self.provider == "dashscope":
-            self.api_key = settings.DASHSCOPE_API_KEY
-            self.model_name = settings.DASHSCOPE_MODEL_NAME
-            self.api_endpoint = settings.DASHSCOPE_API_ENDPOINT
         else:
-            # 兼容旧配置
-            self.api_key = settings.VL_API_KEY
-            self.model_name = settings.VL_MODEL_NAME
-            self.api_endpoint = f"{settings.VL_MODEL_ENDPOINT}/v1/chat/completions"
+            # 使用环境变量配置
+            self.provider = settings.VL_PROVIDER.lower()
+            
+            # 根据 provider 选择配置
+            if self.provider == "zhipu":
+                self.api_key = settings.ZHIPU_API_KEY
+                self.model_name = settings.ZHIPU_MODEL_NAME
+                self.api_endpoint = settings.ZHIPU_API_ENDPOINT
+            elif self.provider == "dashscope":
+                self.api_key = settings.DASHSCOPE_API_KEY
+                self.model_name = settings.DASHSCOPE_MODEL_NAME
+                self.api_endpoint = settings.DASHSCOPE_API_ENDPOINT
+            else:
+                # 兼容旧配置
+                self.api_key = settings.VL_API_KEY
+                self.model_name = settings.VL_MODEL_NAME
+                self.api_endpoint = f"{settings.VL_MODEL_ENDPOINT}/v1/chat/completions"
+        
+        logger.info(f"VLModelService initialized with provider: {self.provider}, model: {self.model_name}")
     
     async def parse_image(
         self, 
@@ -64,6 +93,12 @@ class VLModelService:
         Returns:
             VLParseResult: 结构化解析结果
         """
+        logger.info(f"Calling VL model: {self.provider} / {self.model_name}")
+        
+        # Qwen2.5-VL-7B 本地部署使用特殊的 multipart/form-data 格式
+        if self.provider == "qwen_local":
+            return await self._parse_image_qwen_local(image_url, system_prompt)
+        
         # 读取并编码图片
         image_base64 = await self._load_image(image_url)
         
@@ -78,7 +113,6 @@ class VLModelService:
             messages = self._build_openai_messages(image_base64, system_prompt)
             request_body = self._build_openai_request(messages)
         
-        logger.info(f"Calling VL model: {self.provider} / {self.model_name}")
         logger.debug(f"Request body keys: {list(request_body.keys())}, model: {request_body.get('model')}")
         
         async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -111,6 +145,205 @@ class VLModelService:
         
         return self._build_parse_result(parsed_data)
     
+    async def _parse_image_qwen_local(
+        self, 
+        image_url: str, 
+        system_prompt: str
+    ) -> VLParseResult:
+        """
+        使用 Qwen2.5-VL-7B 本地部署接口解析图片
+        
+        该接口使用 multipart/form-data 格式:
+        - messages: JSON 字符串 (格式: {"messages":[{"role":"user","content":[...]}]})
+        - image_file: 图片文件
+        """
+        # 读取图片文件
+        image_bytes = await self._load_image_bytes(image_url)
+        
+        # 获取图片的实际类型
+        content_type = "image/png"
+        filename = "image.png"
+        if image_url.lower().endswith(('.jpg', '.jpeg')):
+            content_type = "image/jpeg"
+            filename = "image.jpg"
+        
+        # 构建 messages JSON - 严格按照 APIfox 文档格式
+        prompt_text = f"{system_prompt}\n\n{self._build_parse_prompt()}"
+        messages_data = {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt_text},
+                        {"type": "image_url", "image_url": {"uri": ""}}
+                    ]
+                }
+            ]
+        }
+        
+        logger.info(f"Calling Qwen2.5-VL-7B local API: {self.api_endpoint}")
+        logger.info(f"Image size: {len(image_bytes)} bytes, content_type: {content_type}")
+        logger.debug(f"Messages data: {json.dumps(messages_data, ensure_ascii=False)[:200]}...")
+        
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            # 使用 multipart/form-data 格式
+            files = {
+                "image_file": (filename, image_bytes, content_type)
+            }
+            data = {
+                "messages": json.dumps(messages_data, ensure_ascii=False)
+            }
+            headers = {
+                "Authorization": self.api_key
+            }
+            
+            logger.info(f"Sending request with Authorization: {self.api_key[:20]}...")
+            
+            response = await client.post(
+                self.api_endpoint,
+                files=files,
+                data=data,
+                headers=headers
+            )
+            
+            response_text = response.text
+            logger.info(f"Qwen local API response status: {response.status_code}")
+            logger.info(f"Qwen local API response body: {response_text[:1000] if len(response_text) > 1000 else response_text}")
+            
+            if response.status_code != 200:
+                logger.error(f"Qwen local API error {response.status_code}: {response_text}")
+                raise Exception(f"Qwen API 调用失败: {response.status_code} - {response_text}")
+            
+            try:
+                result = response.json()
+            except Exception as e:
+                logger.error(f"Failed to parse JSON response: {e}, raw: {response_text}")
+                raise Exception(f"解析响应失败: {response_text}")
+        
+        logger.info(f"Qwen local API parsed response type: {type(result)}")
+        logger.info(f"Qwen local API parsed response keys: {result.keys() if isinstance(result, dict) else 'N/A'}")
+        
+        # 解析响应 - Qwen API 返回格式: {"result": {"choices": [...]}, "status": "ok"}
+        content = None
+        if isinstance(result, dict):
+            # 首先检查是否有外层的 result 包装
+            actual_result = result
+            if "result" in result and isinstance(result["result"], dict):
+                actual_result = result["result"]
+                logger.info(f"Unwrapped result, inner keys: {actual_result.keys()}")
+            
+            # 尝试各种可能的响应格式
+            if "choices" in actual_result and actual_result["choices"]:
+                choice = actual_result["choices"][0]
+                if isinstance(choice, dict):
+                    if "message" in choice and isinstance(choice["message"], dict):
+                        content = choice["message"].get("content", "")
+                    elif "text" in choice:
+                        content = choice["text"]
+            elif "response" in actual_result:
+                content = actual_result["response"]
+            elif "content" in actual_result:
+                content = actual_result["content"]
+            elif "text" in actual_result:
+                content = actual_result["text"]
+            elif "output" in actual_result:
+                content = actual_result["output"]
+            elif "data" in actual_result:
+                data_field = actual_result["data"]
+                if isinstance(data_field, str):
+                    content = data_field
+                elif isinstance(data_field, dict):
+                    content = data_field.get("content") or data_field.get("text") or json.dumps(data_field, ensure_ascii=False)
+            
+            if content is None:
+                # 如果还是找不到，把整个结果当作内容
+                logger.warning(f"Could not find content field in response, using full response")
+                content = json.dumps(actual_result, ensure_ascii=False)
+        elif isinstance(result, str):
+            content = result
+        else:
+            content = str(result)
+        
+        logger.info(f"Extracted content length: {len(content) if content else 0}")
+        logger.info(f"Qwen local model response: {content[:500] if content and len(content) > 500 else content}")
+        
+        if not content or content.strip() == "" or content == "{}":
+            logger.error("Qwen API returned empty content!")
+            raise Exception("Qwen API 返回了空内容，请检查接口配置或图片是否正确发送")
+        
+        # 尝试解析 JSON
+        messages = [{"role": "user", "content": prompt_text}]
+        parsed_data = await self._parse_json_with_retry(messages, content)
+        
+        return self._build_parse_result(parsed_data)
+    
+    async def _load_image_bytes(self, image_url: str) -> bytes:
+        """加载图片并返回原始字节"""
+        if image_url.startswith(("http://", "https://")):
+            # REQ-M2-016: SSRF 防护
+            if not self._is_safe_url(image_url):
+                raise SSRFProtectionError()
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.get(image_url, follow_redirects=True)
+                content_type = resp.headers.get("Content-Type", "")
+                
+                # REQ-M2-017: 校验图片类型
+                if "image/png" not in content_type and "image/jpeg" not in content_type:
+                    raise InvalidFileTypeError([".png", ".jpg", ".jpeg"])
+                
+                image_bytes = resp.content
+                
+                # REQ-M2-016: 大小限制
+                if len(image_bytes) > settings.MAX_UPLOAD_SIZE:
+                    from app.core.exceptions import FileTooLargeError
+                    raise FileTooLargeError(
+                        max_size_mb=settings.MAX_UPLOAD_SIZE // (1024 * 1024),
+                        actual_size_mb=len(image_bytes) / (1024 * 1024)
+                    )
+                
+                return image_bytes
+        else:
+            # 本地文件 (REQ-M2-018: 仅允许 uploads 目录)
+            if not image_url.startswith("/uploads/"):
+                raise ValueError("仅允许读取 uploads 目录下的文件")
+            
+            file_path = image_url.lstrip("/")
+            async with aiofiles.open(file_path, "rb") as f:
+                return await f.read()
+    
+    async def _parse_image_stream_qwen_local(
+        self, 
+        image_url: str, 
+        system_prompt: str
+    ) -> AsyncGenerator[str, None]:
+        """
+        使用 Qwen2.5-VL-7B 本地部署接口流式解析图片
+        
+        注: 本地接口可能不支持真正的流式输出，这里使用非流式调用并模拟流式返回
+        """
+        try:
+            yield f"data: {json.dumps({'type': 'start', 'message': '正在使用 Qwen2.5-VL-7B 分析图片...'})}\n\n"
+            
+            # 调用非流式接口
+            result = await self._parse_image_qwen_local(image_url, system_prompt)
+            
+            # 模拟流式输出完整的 JSON 响应
+            result_json = json.dumps(result.model_dump(), ensure_ascii=False)
+            
+            # 分块输出内容
+            chunk_size = 100
+            for i in range(0, len(result_json), chunk_size):
+                chunk = result_json[i:i + chunk_size]
+                yield f"data: {json.dumps({'type': 'content', 'content': chunk})}\n\n"
+            
+            # 发送完成事件
+            yield f"data: {json.dumps({'type': 'complete', 'result': result.model_dump()})}\n\n"
+            
+        except Exception as e:
+            logger.error(f"Qwen local stream parsing error: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+    
     async def parse_image_stream(
         self, 
         image_url: str, 
@@ -126,6 +359,14 @@ class VLModelService:
         Yields:
             str: SSE 格式的流式数据
         """
+        logger.info(f"Calling VL model (stream): {self.provider} / {self.model_name}")
+        
+        # Qwen2.5-VL-7B 本地部署 - 由于接口可能不支持流式，使用非流式模式模拟
+        if self.provider == "qwen_local":
+            async for chunk in self._parse_image_stream_qwen_local(image_url, system_prompt):
+                yield chunk
+            return
+        
         try:
             # 读取并编码图片
             image_base64 = await self._load_image(image_url)
@@ -140,8 +381,6 @@ class VLModelService:
             else:
                 messages = self._build_openai_messages(image_base64, system_prompt)
                 request_body = self._build_openai_request(messages, stream=True)
-            
-            logger.info(f"Calling VL model (stream): {self.provider} / {self.model_name}")
             
             accumulated_content = ""
             
