@@ -1,3 +1,7 @@
 .env
 .env.*
 *.env
+.vscode/
+backend/ui_config.db
+backend/uploads/
+frontend/node_modules/

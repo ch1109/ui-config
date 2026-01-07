@@ -1,103 +1,163 @@
 <template>
   <div class="system-prompt-page">
+    <!-- Header -->
     <header class="page-header">
-      <h1><span class="icon">💬</span>UI Config 提示词配置</h1>
-      <p class="subtitle">配置 VL 模型的系统提示词，影响页面解析效果</p>
+      <div class="header-content">
+        <div class="title-group">
+          <h1>
+            <span class="icon-wrapper">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+              </svg>
+            </span>
+            提示词配置
+          </h1>
+          <p class="subtitle">配置 VL 模型的系统提示词，影响页面解析效果</p>
+        </div>
+      </div>
     </header>
     
+    <!-- Content -->
     <div class="page-content">
-      <div class="editor-card card">
-        <div class="editor-header">
-          <h3>System Prompt</h3>
-          <div class="actions">
-            <button 
-              class="btn btn-secondary" 
-              @click="handleReset"
-              :disabled="isLoading"
-            >
-              恢复默认
-            </button>
-            <button 
-              class="btn btn-primary" 
-              @click="handleSave"
-              :disabled="!hasChanges || isLoading || !isValid"
-            >
-              {{ isLoading ? '保存中...' : '保存' }}
-            </button>
+      <div class="content-grid">
+        <!-- Main Editor -->
+        <div class="editor-section">
+          <div class="panel-card">
+            <div class="card-header">
+              <h3>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M16 18l6-6-6-6M8 6l-6 6 6 6"/>
+                </svg>
+                System Prompt
+              </h3>
+              <div class="card-actions">
+                <button class="action-btn secondary" @click="handleReset" :disabled="isLoading">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M1 4v6h6M23 20v-6h-6"/>
+                    <path d="M20.49 9A9 9 0 005.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 013.51 15"/>
+                  </svg>
+                  恢复默认
+                </button>
+                <button 
+                  class="action-btn primary" 
+                  @click="handleSave" 
+                  :disabled="!hasChanges || isLoading || !isValid"
+                >
+                  <span v-if="isLoading" class="btn-spinner"></span>
+                  <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/>
+                    <path d="M17 21v-8H7v8M7 3v5h8"/>
+                  </svg>
+                  保存
+                </button>
+              </div>
+            </div>
+            
+            <div class="card-body">
+              <div class="editor-container">
+                <textarea
+                  v-model="promptContent"
+                  class="prompt-editor"
+                  :class="{ error: !isValid }"
+                  :disabled="isLoading"
+                  placeholder="请输入 System Prompt..."
+                  @input="handleInput"
+                ></textarea>
+                
+                <div class="editor-footer">
+                  <div class="char-counter" :class="counterClass">
+                    <span class="count">{{ charCount }}</span>
+                    <span class="separator">/</span>
+                    <span class="max">{{ maxLength }}</span>
+                    <span class="label">字符</span>
+                  </div>
+                  
+                  <div class="status-hints">
+                    <div v-if="charCount < recommendedMin" class="hint warning">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                      </svg>
+                      建议不少于 100 字符以提升解析效果
+                    </div>
+                    <div v-if="!isValid" class="hint error">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M15 9l-6 6M9 9l6 6"/>
+                      </svg>
+                      已达到最大字符限制
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
         
-        <div class="editor-body">
-          <textarea
-            v-model="promptContent"
-            class="textarea prompt-editor"
-            :class="{ error: !isValid }"
-            :disabled="isLoading"
-            placeholder="请输入 System Prompt..."
-            @input="handleInput"
-          ></textarea>
-          
-          <div class="editor-footer">
-            <div class="char-counter" :class="counterClass">
-              <span class="current">{{ charCount }}</span>
-              <span class="separator">/</span>
-              <span class="max">{{ maxLength }}</span>
-              <span class="unit">字符</span>
+        <!-- Tips Sidebar -->
+        <aside class="tips-section">
+          <div class="panel-card tips-card">
+            <div class="card-header">
+              <h3>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+                </svg>
+                编写提示
+              </h3>
             </div>
-            
-            <div v-if="charCount < recommendedMin" class="hint warning">
-              💡 建议不少于 {{ recommendedMin }} 字符以提升解析效果
-            </div>
-            
-            <div v-if="!isValid" class="hint error">
-              ⚠️ 已达到最大字符限制
+            <div class="card-body">
+              <ul class="tips-list">
+                <li v-for="(tip, index) in tipsList" :key="index" class="tip-item">
+                  <span class="tip-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                      <path d="M20 6L9 17l-5-5"/>
+                    </svg>
+                  </span>
+                  <span class="tip-text">{{ tip }}</span>
+                </li>
+              </ul>
             </div>
           </div>
-        </div>
-      </div>
-      
-      <div class="tips-card card">
-        <h3>📝 编写提示</h3>
-        <ul class="tips-list">
-          <li>明确描述期望的输出格式（JSON Schema）</li>
-          <li>列出需要识别的元素类型和命名规则</li>
-          <li>说明何时需要提出澄清问题</li>
-          <li>定义置信度的评估标准</li>
-        </ul>
+          
+          <!-- Quick Templates -->
+          <div class="panel-card templates-card">
+            <div class="card-header">
+              <h3>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2"/>
+                  <path d="M3 9h18M9 21V9"/>
+                </svg>
+                快速模板
+              </h3>
+            </div>
+            <div class="card-body">
+              <div class="template-items">
+                <button class="template-btn">
+                  <span class="template-icon">📄</span>
+                  <span class="template-name">基础模板</span>
+                </button>
+                <button class="template-btn">
+                  <span class="template-icon">🎯</span>
+                  <span class="template-name">精准识别</span>
+                </button>
+                <button class="template-btn">
+                  <span class="template-icon">🔍</span>
+                  <span class="template-name">详细分析</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </aside>
       </div>
     </div>
-    
-    <!-- 保存成功提示 -->
-    <Transition name="slide">
-      <div v-if="showSuccess" class="toast success">
-        ✅ 保存成功
-      </div>
-    </Transition>
-    
-    <!-- 确认弹窗 -->
-    <ConfirmDialog
-      v-model:visible="showResetConfirm"
-      title="恢复默认"
-      message="确定要恢复为默认模板吗？当前内容将被覆盖。"
-      @confirm="confirmReset"
-    />
-    
-    <!-- 离开确认 -->
-    <ConfirmDialog
-      v-model:visible="showLeaveConfirm"
-      title="未保存的更改"
-      message="您有未保存的更改，确定要离开吗？"
-      @confirm="confirmLeave"
-      @cancel="cancelLeave"
-    />
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, createVNode } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import { systemPromptApi } from '@/api'
-import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import { Modal, message } from 'ant-design-vue'
+import { ExclamationCircleOutlined } from '@ant-design/icons-vue'
 
 // 常量
 const maxLength = 10000
@@ -107,10 +167,14 @@ const recommendedMin = 100
 const promptContent = ref('')
 const originalContent = ref('')
 const isLoading = ref(false)
-const showSuccess = ref(false)
-const showResetConfirm = ref(false)
-const showLeaveConfirm = ref(false)
 const pendingNavigation = ref(null)
+
+const tipsList = [
+  '明确描述期望的输出格式（JSON Schema）',
+  '列出需要识别的元素类型和命名规则',
+  '说明何时需要提出澄清问题',
+  '定义置信度的评估标准'
+]
 
 // 计算属性
 const charCount = computed(() => promptContent.value.length)
@@ -131,6 +195,7 @@ onMounted(async () => {
     originalContent.value = response.prompt_content
   } catch (error) {
     console.error('Failed to load prompt:', error)
+    message.error('加载提示词失败')
   } finally {
     isLoading.value = false
   }
@@ -138,13 +203,12 @@ onMounted(async () => {
 
 // 输入处理
 const handleInput = () => {
-  // 阻止超限输入 (REQ-M1-008)
   if (promptContent.value.length > maxLength) {
     promptContent.value = promptContent.value.slice(0, maxLength)
   }
 }
 
-// 保存 (REQ-M1-006)
+// 保存
 const handleSave = async () => {
   if (!isValid.value) return
   
@@ -154,61 +218,57 @@ const handleSave = async () => {
       prompt_content: promptContent.value
     })
     originalContent.value = promptContent.value
-    
-    // 显示成功提示 3 秒
-    showSuccess.value = true
-    setTimeout(() => {
-      showSuccess.value = false
-    }, 3000)
+    message.success('保存成功')
   } catch (error) {
-    alert(error.response?.data?.message || '保存失败，请检查网络后重试')
+    message.error(error.response?.data?.message || '保存失败')
   } finally {
     isLoading.value = false
   }
 }
 
-// 恢复默认 (REQ-M1-007)
+// 恢复默认
 const handleReset = () => {
-  showResetConfirm.value = true
+  Modal.confirm({
+    title: '恢复默认',
+    icon: createVNode(ExclamationCircleOutlined),
+    content: '确定要恢复为默认模板吗？当前内容将被覆盖。',
+    onOk: async () => {
+      isLoading.value = true
+      try {
+        const response = await systemPromptApi.reset()
+        promptContent.value = response.prompt_content
+        originalContent.value = response.prompt_content
+        message.success('已恢复默认配置')
+      } catch (error) {
+        message.error('恢复失败')
+      } finally {
+        isLoading.value = false
+      }
+    }
+  });
 }
 
-const confirmReset = async () => {
-  showResetConfirm.value = false
-  isLoading.value = true
-  try {
-    const response = await systemPromptApi.reset()
-    promptContent.value = response.prompt_content
-    originalContent.value = response.prompt_content
-  } catch (error) {
-    alert('恢复失败，请重试')
-  } finally {
-    isLoading.value = false
-  }
-}
-
-// 离开页面确认 (REQ-M1-010)
+// 离开页面确认
 onBeforeRouteLeave((to, from, next) => {
   if (hasChanges.value) {
-    pendingNavigation.value = next
-    showLeaveConfirm.value = true
+    Modal.confirm({
+      title: '未保存的更改',
+      icon: createVNode(ExclamationCircleOutlined),
+      content: '您有未保存的更改，确定要离开吗？',
+      okText: '离开',
+      cancelText: '取消',
+      onOk() {
+        next()
+      },
+      onCancel() {
+        // Stay
+      }
+    });
     return false
   }
   next()
 })
 
-const confirmLeave = () => {
-  showLeaveConfirm.value = false
-  if (pendingNavigation.value) {
-    pendingNavigation.value()
-  }
-}
-
-const cancelLeave = () => {
-  showLeaveConfirm.value = false
-  pendingNavigation.value = null
-}
-
-// 浏览器刷新/关闭提示
 const handleBeforeUnload = (e) => {
   if (hasChanges.value) {
     e.preventDefault()
@@ -228,121 +288,371 @@ onBeforeUnmount(() => {
 <style lang="scss" scoped>
 .system-prompt-page {
   min-height: 100vh;
+  background: var(--bg-body);
 }
 
-.page-content {
-  display: grid;
-  grid-template-columns: 1fr 320px;
-  gap: 24px;
-  align-items: start;
-}
-
-.editor-card {
-  .editor-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 20px;
-    
-    h3 {
-      font-size: 16px;
-      font-weight: 600;
-    }
-    
-    .actions {
+.page-header {
+  padding: 40px 48px 32px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-light);
+  
+  .title-group {
+    h1 {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text-heading);
+      margin: 0 0 8px 0;
       display: flex;
-      gap: 12px;
-    }
-  }
-  
-  .prompt-editor {
-    min-height: 400px;
-    font-family: var(--font-mono);
-    font-size: 13px;
-    line-height: 1.7;
-  }
-  
-  .editor-footer {
-    margin-top: 16px;
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    flex-wrap: wrap;
-  }
-  
-  .char-counter {
-    font-size: 13px;
-    font-family: var(--font-mono);
-    color: var(--text-secondary);
-    
-    .current {
-      color: var(--text-primary);
+      align-items: center;
+      gap: 14px;
+      letter-spacing: -0.02em;
     }
     
-    &.warning .current {
-      color: var(--warning);
-    }
-    
-    &.error .current {
-      color: var(--error);
-    }
-  }
-  
-  .hint {
-    font-size: 12px;
-    
-    &.warning {
-      color: var(--warning);
-    }
-    
-    &.error {
-      color: var(--error);
-    }
-  }
-}
-
-.tips-card {
-  h3 {
-    font-size: 15px;
-    font-weight: 600;
-    margin-bottom: 16px;
-  }
-  
-  .tips-list {
-    list-style: none;
-    
-    li {
-      padding: 10px 0;
-      padding-left: 24px;
-      position: relative;
-      font-size: 13px;
-      color: var(--text-secondary);
-      border-bottom: 1px solid var(--border-color);
+    .icon-wrapper {
+      width: 44px;
+      height: 44px;
+      background: linear-gradient(135deg, var(--primary-light) 0%, rgba(99, 102, 241, 0.05) 100%);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       
-      &:last-child {
-        border-bottom: none;
-      }
-      
-      &::before {
-        content: '•';
-        position: absolute;
-        left: 8px;
+      svg {
+        width: 24px;
+        height: 24px;
         color: var(--primary);
       }
     }
+    
+    .subtitle {
+      color: var(--text-muted);
+      font-size: 15px;
+      margin: 0;
+      padding-left: 58px;
+    }
   }
 }
 
-// Toast 动画
-.slide-enter-active,
-.slide-leave-active {
-  transition: all 0.3s ease;
+.page-content {
+  padding: 32px 48px;
 }
 
-.slide-enter-from,
-.slide-leave-to {
-  transform: translateX(100%);
-  opacity: 0;
+.content-grid {
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  gap: 24px;
+  max-width: 1600px;
+}
+
+.panel-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-light);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border-light);
+  background: linear-gradient(to bottom, var(--bg-elevated) 0%, var(--bg-subtle) 100%);
+  
+  h3 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-heading);
+    margin: 0;
+    
+    svg {
+      width: 18px;
+      height: 18px;
+      color: var(--primary);
+    }
+  }
+  
+  .card-actions {
+    display: flex;
+    gap: 10px;
+  }
+}
+
+.card-body {
+  padding: 24px;
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 16px;
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: 10px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+  
+  svg {
+    width: 16px;
+    height: 16px;
+  }
+  
+  &.secondary {
+    background: var(--bg-subtle);
+    color: var(--text-secondary);
+    
+    &:hover:not(:disabled) {
+      background: var(--border-color);
+      color: var(--text-primary);
+    }
+  }
+  
+  &.primary {
+    background: var(--primary);
+    color: white;
+    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+    
+    &:hover:not(:disabled) {
+      background: var(--primary-hover);
+      transform: translateY(-1px);
+    }
+    
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+  }
+}
+
+.btn-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.editor-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.prompt-editor {
+  width: 100%;
+  min-height: 500px;
+  padding: 20px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--text-primary);
+  background: var(--bg-subtle);
+  border: 2px solid var(--border-color);
+  border-radius: 12px;
+  outline: none;
+  resize: vertical;
+  transition: all 0.2s;
+  
+  &::placeholder {
+    color: var(--text-muted);
+  }
+  
+  &:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-light);
+    background: var(--bg-elevated);
+  }
+  
+  &.error {
+    border-color: var(--error);
+    
+    &:focus {
+      box-shadow: 0 0 0 3px var(--error-light);
+    }
+  }
+}
+
+.editor-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.char-counter {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-muted);
+  
+  .count {
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+  
+  .separator {
+    color: var(--text-muted);
+  }
+  
+  .max {
+    color: var(--text-muted);
+  }
+  
+  .label {
+    margin-left: 4px;
+    color: var(--text-muted);
+  }
+  
+  &.warning .count {
+    color: var(--warning);
+  }
+  
+  &.error .count {
+    color: var(--error);
+  }
+}
+
+.status-hints {
+  display: flex;
+  gap: 12px;
+}
+
+.hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 8px;
+  
+  svg {
+    width: 14px;
+    height: 14px;
+  }
+  
+  &.warning {
+    background: var(--warning-light);
+    color: #b45309;
+  }
+  
+  &.error {
+    background: var(--error-light);
+    color: var(--error);
+  }
+}
+
+.tips-section {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.tips-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tip-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  background: var(--bg-subtle);
+  border-radius: 10px;
+  
+  .tip-icon {
+    width: 20px;
+    height: 20px;
+    background: var(--success-light);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    
+    svg {
+      width: 12px;
+      height: 12px;
+      color: var(--success);
+    }
+  }
+  
+  .tip-text {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+}
+
+.template-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.template-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 16px;
+  background: var(--bg-subtle);
+  border: 1px solid transparent;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+  
+  .template-icon {
+    font-size: 18px;
+  }
+  
+  .template-name {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
+  
+  &:hover {
+    background: var(--bg-elevated);
+    border-color: var(--primary);
+    
+    .template-name {
+      color: var(--primary);
+    }
+  }
+}
+
+@media (max-width: 1200px) {
+  .content-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .tips-section {
+    flex-direction: row;
+    
+    .panel-card {
+      flex: 1;
+    }
+  }
 }
 </style>
-

@@ -1,141 +1,169 @@
 <template>
-  <div class="clarify-panel card">
+  <div class="clarify-panel">
+    <!-- Header -->
     <div class="panel-header">
       <div class="assistant-info">
-        <div class="avatar">🤖</div>
+        <div class="avatar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2a2 2 0 012 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 017 7h1a1 1 0 110 2h-1.07A7 7 0 0113 23a7 7 0 01-7.07-7H5a1 1 0 110-2h1a7 7 0 017-7h1V5.73A2 2 0 0112 2z"/>
+          </svg>
+        </div>
         <span class="name">AI 助手</span>
-        <span v-if="status" class="status-badge" :class="statusClass">
-          {{ statusText }}
-        </span>
       </div>
+      <span v-if="status" :class="['status-badge', status]">
+        <span class="status-dot"></span>
+        {{ statusText }}
+      </span>
     </div>
     
+    <!-- Chat Container -->
     <div class="chat-container" ref="chatContainer">
-      <!-- 初始欢迎消息 -->
+      <!-- Welcome Message -->
       <div class="message assistant" v-if="chatHistory.length === 0 && !status">
         <div class="bubble">
-          👋 你好！上传页面截图并点击"AI 辅助填写"，我将帮助您自动识别页面元素。
-          <br><br>
-          您也可以直接在下方输入框描述您想要配置的页面功能。
+          <div class="welcome-content">
+            <div class="welcome-icon">👋</div>
+            <div class="welcome-text">
+              <p>你好！上传页面截图并点击"AI 辅助填写"，我将帮助您自动识别页面元素。</p>
+              <p class="sub">您也可以直接在下方输入框描述您想要配置的页面功能。</p>
+            </div>
+          </div>
         </div>
       </div>
       
-      <!-- 对话历史 -->
+      <!-- Chat History -->
       <template v-for="(item, index) in chatHistory" :key="index">
         <div class="message" :class="item.role">
-          <div class="bubble">
-            <!-- 如果有图片 -->
-            <img 
-              v-if="item.image" 
-              :src="item.image" 
-              class="chat-image"
-              @click="previewImage(item.image)"
-            />
-            <span v-html="formatMessage(item.content)"></span>
-            <!-- 流式输入光标 -->
-            <span v-if="item.isStreaming" class="streaming-cursor">▊</span>
+          <div class="bubble-wrapper">
+            <div v-if="item.role === 'assistant'" class="avatar small">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2a2 2 0 012 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 017 7h1a1 1 0 110 2h-1.07A7 7 0 0113 23a7 7 0 01-7.07-7H5a1 1 0 110-2h1a7 7 0 017-7h1V5.73A2 2 0 0112 2z"/>
+              </svg>
+            </div>
+            <div class="bubble">
+              <img 
+                v-if="item.image" 
+                :src="item.image" 
+                class="chat-image"
+                @click="previewImage(item.image)"
+              />
+              <span v-html="formatMessage(item.content)"></span>
+              <span v-if="item.isStreaming" class="streaming-cursor">▊</span>
+            </div>
           </div>
           <span class="timestamp">{{ formatTime(item.timestamp) }}</span>
         </div>
       </template>
       
-      <!-- 解析中状态 - 显示流式内容 -->
+      <!-- Parsing State -->
       <div v-if="status === 'parsing'" class="message assistant">
-        <div class="bubble">
-          <template v-if="streamingContent">
-            <pre class="streaming-output">{{ streamingContent }}</pre>
-            <span class="streaming-cursor">▊</span>
-          </template>
-          <template v-else>
-            👋 你好！我正在分析页面截图，识别可交互元素...
-          </template>
+        <div class="bubble-wrapper">
+          <div class="avatar small">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2a2 2 0 012 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 017 7h1a1 1 0 110 2h-1.07A7 7 0 0113 23a7 7 0 01-7.07-7H5a1 1 0 110-2h1a7 7 0 017-7h1V5.73A2 2 0 0112 2z"/>
+            </svg>
+          </div>
+          <div class="bubble">
+            <template v-if="streamingContent">
+              <pre class="streaming-output">{{ streamingContent }}</pre>
+              <span class="streaming-cursor">▊</span>
+            </template>
+            <template v-else>
+              <div class="parsing-message">
+                <span class="parsing-icon">🔍</span>
+                正在分析页面截图，识别可交互元素...
+              </div>
+            </template>
+          </div>
         </div>
       </div>
       
-      <!-- 加载状态 -->
+      <!-- Loading -->
       <div v-if="isLoading" class="message assistant">
-        <div class="bubble loading">
-          <span class="dot"></span>
-          <span class="dot"></span>
-          <span class="dot"></span>
+        <div class="bubble-wrapper">
+          <div class="avatar small">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2a2 2 0 012 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 017 7h1a1 1 0 110 2h-1.07A7 7 0 0113 23a7 7 0 01-7.07-7H5a1 1 0 110-2h1a7 7 0 017-7h1V5.73A2 2 0 0112 2z"/>
+            </svg>
+          </div>
+          <div class="bubble loading">
+            <span class="dot"></span>
+            <span class="dot"></span>
+            <span class="dot"></span>
+          </div>
         </div>
       </div>
       
-      <!-- 配置概览 - 需要用户确认 -->
+      <!-- Config Preview -->
       <template v-if="showConfigPreview && pendingConfig">
         <div class="message assistant">
-          <div class="bubble config-preview">
-            <div class="preview-header">
-              ✅ 解析完成！以下是识别到的配置信息：
+          <div class="bubble-wrapper">
+            <div class="avatar small">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2a2 2 0 012 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 017 7h1a1 1 0 110 2h-1.07A7 7 0 0113 23a7 7 0 01-7.07-7H5a1 1 0 110-2h1a7 7 0 017-7h1V5.73A2 2 0 0112 2z"/>
+              </svg>
             </div>
-            
-            <div class="config-summary">
-              <div class="config-item" v-if="pendingConfig.page_name">
-                <label>页面名称：</label>
-                <span>{{ pendingConfig.page_name['zh-CN'] || '' }}</span>
+            <div class="bubble config-preview">
+              <div class="preview-header">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M20 6L9 17l-5-5"/>
+                </svg>
+                解析完成！以下是识别到的配置信息：
               </div>
               
-              <div class="config-item" v-if="pendingConfig.page_description">
-                <label>页面描述：</label>
-                <span class="desc">{{ pendingConfig.page_description['zh-CN'] || '' }}</span>
-              </div>
-              
-              <div class="config-item" v-if="pendingConfig.button_list?.length">
-                <label>识别到的按钮 ({{ pendingConfig.button_list.length }}个)：</label>
-                <div class="tag-list">
-                  <span class="tag" v-for="btn in pendingConfig.button_list" :key="btn">{{ btn }}</span>
+              <div class="config-summary">
+                <div class="config-item" v-if="pendingConfig.page_name">
+                  <label>页面名称：</label>
+                  <span>{{ pendingConfig.page_name['zh-CN'] || '' }}</span>
+                </div>
+                <div class="config-item" v-if="pendingConfig.button_list?.length">
+                  <label>识别到的按钮 ({{ pendingConfig.button_list.length }}个)：</label>
+                  <div class="tag-list">
+                    <span v-for="btn in pendingConfig.button_list" :key="btn" class="config-tag">{{ btn }}</span>
+                  </div>
+                </div>
+                <div class="config-item" v-if="pendingConfig.optional_actions?.length">
+                  <label>可选操作：</label>
+                  <div class="tag-list">
+                    <span v-for="action in pendingConfig.optional_actions" :key="action" class="config-tag accent">{{ action }}</span>
+                  </div>
                 </div>
               </div>
               
-              <div class="config-item" v-if="pendingConfig.optional_actions?.length">
-                <label>可选操作：</label>
-                <div class="tag-list">
-                  <span class="tag" v-for="action in pendingConfig.optional_actions" :key="action">{{ action }}</span>
-                </div>
+              <div class="preview-actions">
+                <button class="action-btn secondary" @click="rejectConfig">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M1 4v6h6M23 20v-6h-6"/>
+                    <path d="M20.49 9A9 9 0 005.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 013.51 15"/>
+                  </svg>
+                  重新识别
+                </button>
+                <button class="action-btn primary" @click="confirmConfig">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M20 6L9 17l-5-5"/>
+                  </svg>
+                  确认应用
+                </button>
               </div>
-              
-              <div class="config-item" v-if="pendingConfig.overall_confidence">
-                <label>置信度：</label>
-                <span class="confidence" :class="getConfidenceClass(pendingConfig.overall_confidence)">
-                  {{ Math.round(pendingConfig.overall_confidence * 100) }}%
-                </span>
-              </div>
-            </div>
-            
-            <div class="preview-actions">
-              <button class="btn btn-secondary" @click="rejectConfig">
-                🔄 重新识别
-              </button>
-              <button class="btn btn-primary" @click="confirmConfig">
-                ✓ 确认应用到表单
-              </button>
             </div>
           </div>
         </div>
       </template>
       
-      <!-- 已确认提示 -->
-      <div v-if="configConfirmed" class="message assistant">
-        <div class="bubble success">
-          ✅ 配置已应用到左侧表单，您可以继续修改或直接保存
-        </div>
-      </div>
-      
-      <!-- 失败提示 -->
-      <div v-if="status === 'failed'" class="message assistant">
-        <div class="bubble error">
-          ❌ 解析失败，请重试或手动填写配置
-        </div>
-      </div>
-      
-      <!-- 当前澄清问题 -->
+      <!-- Clarification Question -->
       <template v-if="currentQuestion && status === 'clarifying'">
         <div class="message assistant">
-          <div class="bubble">
-            {{ currentQuestion.question_text || currentQuestion }}
+          <div class="bubble-wrapper">
+            <div class="avatar small">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2a2 2 0 012 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 017 7h1a1 1 0 110 2h-1.07A7 7 0 0113 23a7 7 0 01-7.07-7H5a1 1 0 110-2h1a7 7 0 017-7h1V5.73A2 2 0 0112 2z"/>
+              </svg>
+            </div>
+            <div class="bubble">
+              {{ currentQuestion.question_text || currentQuestion }}
+            </div>
           </div>
           
-          <!-- 快捷选项 -->
           <div v-if="currentQuestion.options" class="quick-options">
             <button
               v-for="opt in currentQuestion.options"
@@ -150,32 +178,29 @@
       </template>
     </div>
     
-    <!-- 图片预览弹层 -->
-    <div v-if="previewImageUrl" class="image-preview-overlay" @click="previewImageUrl = null">
-      <img :src="previewImageUrl" />
-    </div>
-    
-    <!-- 待上传图片预览 -->
+    <!-- Image Preview Modal -->
+    <a-image
+      :width="200"
+      :style="{ display: 'none' }"
+      :preview="{
+        visible: !!previewImageUrl,
+        onVisibleChange: (vis) => { if (!vis) previewImageUrl = null },
+        src: previewImageUrl
+      }"
+    />
+
+    <!-- Pending Image Preview -->
     <div v-if="pendingImage" class="pending-image">
       <img :src="pendingImagePreview" />
-      <button class="remove-btn" @click="removePendingImage">✕</button>
+      <button class="remove-btn" @click="removePendingImage">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 6L6 18M6 6l12 12"/>
+        </svg>
+      </button>
     </div>
     
-    <!-- 输入区域 - 始终显示 -->
+    <!-- Input Area -->
     <div class="input-area">
-      <div class="input-toolbar">
-        <button class="toolbar-btn" @click="triggerImageUpload" :disabled="isLoading" title="上传图片">
-          📷
-        </button>
-        <input
-          ref="imageInput"
-          type="file"
-          accept="image/*"
-          class="hidden-input"
-          @change="handleImageSelect"
-        />
-      </div>
-      
       <div class="input-wrapper">
         <textarea
           ref="inputRef"
@@ -186,16 +211,18 @@
           rows="1"
         ></textarea>
         <button 
-          class="send-btn" 
+          class="send-btn"
           :disabled="(!inputText.trim() && !pendingImage) || isLoading"
           @click="sendMessage"
         >
-          ➤
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+          </svg>
         </button>
       </div>
       
       <div class="input-hint">
-        <span>Enter 发送 · Shift+Enter 换行</span>
+        Enter 发送 · Shift+Enter 换行
       </div>
     </div>
   </div>
@@ -211,33 +238,22 @@ const props = defineProps({
   status: String,
   currentConfig: Object,
   imageUrl: String,
-  streamingContent: String  // 流式输出的实时内容
+  streamingContent: String
 })
 
 const emit = defineEmits(['config-updated', 'config-confirmed', 'completed'])
 
-// 状态
 const chatHistory = ref([])
 const currentQuestion = ref(null)
 const inputText = ref('')
 const isLoading = ref(false)
 const chatContainer = ref(null)
-const inputRef = ref(null)
-const imageInput = ref(null)
 const pendingImage = ref(null)
 const pendingImagePreview = ref(null)
 const previewImageUrl = ref(null)
 const showConfigPreview = ref(false)
 const pendingConfig = ref(null)
 const configConfirmed = ref(false)
-
-// 计算属性
-const statusClass = computed(() => ({
-  'status-parsing': props.status === 'parsing',
-  'status-clarifying': props.status === 'clarifying',
-  'status-completed': props.status === 'completed',
-  'status-failed': props.status === 'failed'
-}))
 
 const statusText = computed(() => {
   const map = {
@@ -250,10 +266,8 @@ const statusText = computed(() => {
   return map[props.status] || ''
 })
 
-// 监听解析结果变化 - 显示配置概览
 watch(() => props.parseResult, (newResult) => {
   if (newResult && props.status === 'completed' && !configConfirmed.value) {
-    // 显示配置概览，等待用户确认
     pendingConfig.value = newResult
     showConfigPreview.value = true
     scrollToBottom()
@@ -266,10 +280,8 @@ watch(() => props.parseResult, (newResult) => {
   }
 }, { immediate: true })
 
-// 监听状态变化
 watch(() => props.status, (newStatus, oldStatus) => {
   if (newStatus === 'parsing' && oldStatus !== 'parsing') {
-    // 开始解析，添加消息
     chatHistory.value.push({
       role: 'assistant',
       content: '正在分析页面截图，请稍候...',
@@ -294,14 +306,12 @@ watch(() => props.status, (newStatus, oldStatus) => {
   }
 })
 
-// 监听流式内容变化，自动滚动到底部
 watch(() => props.streamingContent, () => {
   if (props.streamingContent) {
     scrollToBottom()
   }
 })
 
-// 确认配置
 const confirmConfig = () => {
   if (pendingConfig.value) {
     emit('config-confirmed', pendingConfig.value)
@@ -317,14 +327,13 @@ const confirmConfig = () => {
   }
 }
 
-// 拒绝配置，重新识别
 const rejectConfig = () => {
   showConfigPreview.value = false
   chatHistory.value.push({
-    role: 'user',
-    content: '需要重新识别',
-    timestamp: new Date()
-  })
+      role: 'user',
+      content: '需要重新识别',
+      timestamp: new Date()
+    })
   chatHistory.value.push({
     role: 'assistant',
     content: '好的，请重新上传图片或描述您的需求，我会重新分析。',
@@ -333,14 +342,6 @@ const rejectConfig = () => {
   scrollToBottom()
 }
 
-// 获取置信度样式
-const getConfidenceClass = (confidence) => {
-  if (confidence >= 0.85) return 'high'
-  if (confidence >= 0.6) return 'medium'
-  return 'low'
-}
-
-// 处理键盘事件
 const handleKeydown = (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
@@ -348,37 +349,25 @@ const handleKeydown = (e) => {
   }
 }
 
-// 触发图片上传
-const triggerImageUpload = () => {
-  imageInput.value?.click()
-}
-
-// 处理图片选择
-const handleImageSelect = (e) => {
-  const file = e.target.files[0]
-  if (file) {
-    pendingImage.value = file
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      pendingImagePreview.value = e.target.result
-    }
-    reader.readAsDataURL(file)
+const beforeImageUpload = (file) => {
+  pendingImage.value = file
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    pendingImagePreview.value = e.target.result
   }
-  e.target.value = ''
+  reader.readAsDataURL(file)
+  return false
 }
 
-// 移除待上传图片
 const removePendingImage = () => {
   pendingImage.value = null
   pendingImagePreview.value = null
 }
 
-// 预览图片
 const previewImage = (url) => {
   previewImageUrl.value = url
 }
 
-// 发送消息
 const sendMessage = async () => {
   if ((!inputText.value.trim() && !pendingImage.value) || isLoading.value) return
   
@@ -400,10 +389,7 @@ const sendMessage = async () => {
   
   try {
     if (props.sessionId && (props.status === 'clarifying' || props.status === 'completed')) {
-      // 使用流式聊天接口
       let accumulatedContent = ''
-      
-      // 添加一个临时的 AI 消息用于显示流式内容
       const aiMessageIndex = chatHistory.value.length
       chatHistory.value.push({
         role: 'assistant',
@@ -416,25 +402,18 @@ const sendMessage = async () => {
         props.sessionId,
         userMessage,
         props.currentConfig,
-        // onMessage
         (data) => {
-          if (data.type === 'start') {
-            console.log('开始处理:', data.message)
-          } else if (data.type === 'content') {
+          if (data.type === 'content') {
             accumulatedContent += data.content
-            // 实时更新消息内容
             chatHistory.value[aiMessageIndex].content = accumulatedContent
             scrollToBottom()
           }
         },
-        // onComplete
         (result) => {
-          // 移除流式标记
           chatHistory.value[aiMessageIndex].isStreaming = false
           chatHistory.value[aiMessageIndex].content = accumulatedContent || '好的，我已根据您的建议更新了配置。'
           
           if (result) {
-            // 显示更新后的配置概览
             pendingConfig.value = result
             showConfigPreview.value = true
             configConfirmed.value = false
@@ -442,7 +421,6 @@ const sendMessage = async () => {
           isLoading.value = false
           scrollToBottom()
         },
-        // onError
         (error) => {
           chatHistory.value[aiMessageIndex].isStreaming = false
           chatHistory.value[aiMessageIndex].content = `❌ ${error || '请求失败，请重试'}`
@@ -450,12 +428,9 @@ const sendMessage = async () => {
           scrollToBottom()
         }
       )
-      
-      // 保存引用以便清理
       window._currentChatStream = stream
       
     } else {
-      // 没有会话时的通用回复
       chatHistory.value.push({
         role: 'assistant',
         content: '请先上传页面截图并点击"AI 辅助填写"，我会帮您识别页面元素。',
@@ -463,9 +438,7 @@ const sendMessage = async () => {
       })
       isLoading.value = false
     }
-    
   } catch (error) {
-    console.error('Chat error:', error)
     chatHistory.value.push({
       role: 'assistant',
       content: `❌ ${error.response?.data?.message || '请求失败，请重试'}`,
@@ -477,13 +450,11 @@ const sendMessage = async () => {
   }
 }
 
-// 选择快捷选项
 const selectOption = (option) => {
   inputText.value = option
   sendMessage()
 }
 
-// 滚动到底部
 const scrollToBottom = () => {
   nextTick(() => {
     if (chatContainer.value) {
@@ -492,13 +463,11 @@ const scrollToBottom = () => {
   })
 }
 
-// 格式化消息
 const formatMessage = (text) => {
   if (!text) return ''
   return text.replace(/\n/g, '<br>')
 }
 
-// 格式化时间
 const formatTime = (date) => {
   return new Date(date).toLocaleTimeString('zh-CN', {
     hour: '2-digit',
@@ -512,159 +481,232 @@ const formatTime = (date) => {
   display: flex;
   flex-direction: column;
   height: 100%;
-  max-height: calc(100vh - 200px);
-  padding: 0;
-  overflow: hidden;
+  min-height: 580px;
 }
 
 .panel-header {
-  padding: 16px;
-  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-light);
 }
 
 .assistant-info {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
+  
+  .name {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-heading);
+  }
 }
 
 .avatar {
-  font-size: 24px;
-}
-
-.name {
-  font-weight: 600;
-  font-size: 14px;
+  width: 36px;
+  height: 36px;
+  background: linear-gradient(135deg, var(--primary) 0%, #818cf8 100%);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  
+  svg {
+    width: 18px;
+    height: 18px;
+    color: white;
+  }
+  
+  &.small {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    flex-shrink: 0;
+    
+    svg {
+      width: 14px;
+      height: 14px;
+    }
+  }
 }
 
 .status-badge {
-  font-size: 11px;
-  padding: 3px 8px;
-  border-radius: 999px;
-  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 20px;
   
-  &.status-parsing {
+  .status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+  }
+  
+  &.parsing {
     background: var(--primary-light);
     color: var(--primary);
+    .status-dot { background: var(--primary); animation: pulse 1.5s infinite; }
   }
   
-  &.status-clarifying {
-    background: rgba(245, 158, 11, 0.15);
-    color: var(--warning);
+  &.clarifying {
+    background: var(--warning-light);
+    color: #b45309;
+    .status-dot { background: var(--warning); }
   }
   
-  &.status-completed {
-    background: rgba(16, 185, 129, 0.15);
+  &.completed {
+    background: var(--success-light);
     color: var(--success);
+    .status-dot { background: var(--success); }
   }
   
-  &.status-failed {
-    background: rgba(239, 68, 68, 0.15);
+  &.failed {
+    background: var(--error-light);
     color: var(--error);
+    .status-dot { background: var(--error); }
   }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }
 
 .chat-container {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: 20px;
+  background: var(--bg-subtle);
+  min-height: 350px;
 }
 
 .message {
-  margin-bottom: 16px;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
   
   &.user {
-    text-align: right;
+    align-items: flex-end;
     
     .bubble {
       background: var(--primary);
-      color: #000;
+      color: white;
+      border-radius: 16px 16px 4px 16px;
     }
   }
   
   &.assistant {
+    align-items: flex-start;
+    
     .bubble {
-      background: var(--bg-secondary);
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-light);
+      border-radius: 4px 16px 16px 16px;
     }
   }
 }
 
-.bubble {
-  display: inline-block;
+.bubble-wrapper {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
   max-width: 90%;
-  padding: 10px 14px;
-  border-radius: 12px;
+}
+
+.bubble {
+  padding: 12px 16px;
   font-size: 13px;
-  line-height: 1.5;
-  text-align: left;
+  line-height: 1.6;
+  box-shadow: var(--shadow-sm);
   
   &.loading {
-    display: inline-flex;
-    gap: 4px;
-    padding: 12px 16px;
-  }
-  
-  &.success {
-    background: rgba(16, 185, 129, 0.15);
-    color: var(--success);
-  }
-  
-  &.error {
-    background: rgba(239, 68, 68, 0.15);
-    color: var(--error);
+    display: flex;
+    gap: 6px;
+    padding: 16px 20px;
   }
   
   &.config-preview {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
     max-width: 100%;
     width: 100%;
   }
 }
 
+.welcome-content {
+  display: flex;
+  gap: 12px;
+  
+  .welcome-icon {
+    font-size: 24px;
+    flex-shrink: 0;
+  }
+  
+  .welcome-text {
+    p {
+      margin: 0 0 8px 0;
+      
+      &.sub {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-bottom: 0;
+      }
+    }
+  }
+}
+
+.parsing-message {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  
+  .parsing-icon {
+    font-size: 18px;
+  }
+}
+
 .preview-header {
-  font-weight: 600;
-  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  font-weight: 500;
   color: var(--success);
+  
+  svg {
+    width: 18px;
+    height: 18px;
+  }
 }
 
 .config-summary {
-  background: var(--bg-primary);
-  border-radius: 8px;
-  padding: 12px;
-  margin-bottom: 12px;
+  background: var(--bg-subtle);
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 16px;
 }
 
 .config-item {
-  margin-bottom: 10px;
+  margin-bottom: 12px;
   
   &:last-child {
     margin-bottom: 0;
   }
   
   label {
-    display: block;
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-muted);
-    margin-bottom: 4px;
+    display: block;
+    margin-bottom: 6px;
   }
   
   span {
-    font-size: 13px;
-    color: var(--text-primary);
-    
-    &.desc {
-      display: block;
-      line-height: 1.5;
-    }
-  }
-  
-  .confidence {
-    font-weight: 600;
-    
-    &.high { color: var(--success); }
-    &.medium { color: var(--warning); }
-    &.low { color: var(--error); }
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-heading);
   }
 }
 
@@ -672,44 +714,98 @@ const formatTime = (date) => {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 4px;
+}
+
+.config-tag {
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--primary-light);
+  color: var(--primary);
+  border-radius: 20px;
   
-  .tag {
-    font-size: 11px;
-    padding: 3px 8px;
-    background: var(--primary-light);
-    color: var(--primary);
-    border-radius: 4px;
+  &.accent {
+    background: var(--accent-light);
+    color: var(--accent);
   }
 }
 
 .preview-actions {
   display: flex;
-  gap: 8px;
-  justify-content: flex-end;
+  gap: 10px;
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
   
-  .btn {
-    font-size: 12px;
-    padding: 6px 12px;
+  svg {
+    width: 14px;
+    height: 14px;
+  }
+  
+  &.secondary {
+    background: var(--bg-subtle);
+    color: var(--text-secondary);
+    
+    &:hover {
+      background: var(--border-color);
+    }
+  }
+  
+  &.primary {
+    background: var(--primary);
+    color: white;
+    
+    &:hover {
+      background: var(--primary-hover);
+    }
   }
 }
 
-.chat-image {
-  max-width: 200px;
-  max-height: 150px;
-  border-radius: 8px;
-  margin-bottom: 8px;
+.quick-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  padding-left: 38px;
+}
+
+.option-btn {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--primary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--primary);
+  border-radius: 20px;
   cursor: pointer;
-  display: block;
+  transition: all 0.2s;
   
   &:hover {
-    opacity: 0.9;
+    background: var(--primary);
+    color: white;
   }
+}
+
+.timestamp {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 6px;
+  padding: 0 4px;
 }
 
 .dot {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
   background: var(--text-muted);
   border-radius: 50%;
   animation: bounce 1.4s infinite ease-in-out;
@@ -719,174 +815,105 @@ const formatTime = (date) => {
 }
 
 @keyframes bounce {
-  0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
   40% { transform: scale(1); opacity: 1; }
 }
 
-@keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
+.streaming-output {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .streaming-cursor {
-  display: inline-block;
-  margin-left: 2px;
   animation: blink 1s infinite;
   color: var(--primary);
-  font-weight: bold;
 }
 
-.streaming-output {
-  margin: 0;
-  padding: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.5;
-  max-height: 300px;
-  overflow-y: auto;
-  background: transparent;
-  color: inherit;
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
 }
 
-.timestamp {
-  display: block;
-  font-size: 10px;
-  color: var(--text-muted);
-  margin-top: 4px;
-}
-
-.quick-options {
-  margin-top: 10px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.option-btn {
-  padding: 6px 14px;
-  border: 1px solid var(--primary);
-  border-radius: 16px;
-  background: transparent;
-  color: var(--primary);
+.chat-image {
+  max-width: 200px;
+  border-radius: 8px;
+  margin-bottom: 8px;
   cursor: pointer;
-  font-size: 12px;
-  transition: all 0.2s;
+  transition: transform 0.2s;
   
   &:hover {
-    background: var(--primary-light);
-  }
-}
-
-.image-preview-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.9);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  cursor: pointer;
-  
-  img {
-    max-width: 90vw;
-    max-height: 90vh;
-    border-radius: 8px;
+    transform: scale(1.02);
   }
 }
 
 .pending-image {
   position: relative;
-  padding: 8px 16px;
-  border-top: 1px solid var(--border-color);
+  margin: 0 20px 10px;
   
   img {
-    max-height: 80px;
+    max-width: 120px;
     border-radius: 8px;
+    border: 2px solid var(--primary);
   }
   
   .remove-btn {
     position: absolute;
-    top: 4px;
-    right: 12px;
-    width: 20px;
-    height: 20px;
-    border: none;
+    top: -8px;
+    right: -8px;
+    width: 24px;
+    height: 24px;
     background: var(--error);
-    color: white;
+    border: none;
     border-radius: 50%;
+    color: white;
     cursor: pointer;
-    font-size: 12px;
     display: flex;
     align-items: center;
     justify-content: center;
     
-    &:hover {
-      transform: scale(1.1);
+    svg {
+      width: 12px;
+      height: 12px;
     }
   }
 }
 
 .input-area {
-  padding: 12px 16px;
-  border-top: 1px solid var(--border-color);
-}
-
-.input-toolbar {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.toolbar-btn {
-  width: 32px;
-  height: 32px;
-  border: 1px solid var(--border-color);
-  background: var(--bg-secondary);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  font-size: 14px;
-  transition: all 0.2s;
-  
-  &:hover:not(:disabled) {
-    background: var(--bg-hover);
-    border-color: var(--primary);
-  }
-  
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-}
-
-.hidden-input {
-  display: none;
+  padding: 16px 20px;
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border-light);
 }
 
 .input-wrapper {
   display: flex;
-  gap: 8px;
-  background: var(--bg-secondary);
+  gap: 10px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-color);
   border-radius: 12px;
-  padding: 8px 8px 8px 14px;
+  padding: 10px 14px;
   align-items: flex-end;
+  transition: all 0.2s;
+  
+  &:focus-within {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-light);
+  }
   
   textarea {
     flex: 1;
     border: none;
     background: transparent;
-    outline: none;
-    font-size: 13px;
+    font-size: 14px;
+    font-family: var(--font-sans);
     color: var(--text-primary);
     resize: none;
+    outline: none;
     min-height: 20px;
     max-height: 100px;
-    line-height: 1.4;
-    font-family: inherit;
     
     &::placeholder {
       color: var(--text-muted);
@@ -895,23 +922,31 @@ const formatTime = (date) => {
 }
 
 .send-btn {
-  width: 32px;
-  height: 32px;
-  border: none;
-  background: var(--primary);
-  color: #000;
-  border-radius: 50%;
-  cursor: pointer;
-  font-size: 14px;
-  transition: all 0.2s;
+  width: 36px;
+  height: 36px;
   flex-shrink: 0;
+  background: var(--primary);
+  border: none;
+  border-radius: 10px;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  
+  svg {
+    width: 18px;
+    height: 18px;
+  }
   
   &:hover:not(:disabled) {
+    background: var(--primary-hover);
     transform: scale(1.05);
   }
   
   &:disabled {
-    opacity: 0.5;
+    opacity: 0.4;
     cursor: not-allowed;
   }
 }
@@ -919,7 +954,7 @@ const formatTime = (date) => {
 .input-hint {
   font-size: 11px;
   color: var(--text-muted);
-  margin-top: 6px;
+  margin-top: 8px;
   text-align: center;
 }
 </style>

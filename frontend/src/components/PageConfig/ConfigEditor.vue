@@ -1,69 +1,83 @@
 <template>
-  <div class="config-editor card">
+  <div class="config-editor">
     <!-- 基本信息区 -->
     <section class="section">
-      <h3 class="section-title">📝 基本信息</h3>
+      <div class="section-header">
+        <div class="section-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+          </svg>
+        </div>
+        <h3>基本信息</h3>
+      </div>
       
-      <div class="form-row">
-        <div class="form-group">
-          <label>页面 ID (英文标识) <span class="required">*</span></label>
+      <div class="form-grid">
+        <div class="form-field full-width">
+          <label>
+            页面 ID (英文标识)
+            <span class="required">*</span>
+          </label>
           <input 
             v-model="localConfig.page_id"
-            class="input"
+            type="text"
+            class="form-input"
             :class="{ error: errors.page_id }"
             placeholder="例如: home_page, user_profile"
             @input="handleChange"
           />
-          <p v-if="errors.page_id" class="error-text">{{ errors.page_id }}</p>
-          <p class="hint">格式: snake_case 或 dot.notation</p>
+          <span class="field-hint" :class="{ error: errors.page_id }">
+            {{ errors.page_id || '格式: snake_case 或 dot.notation' }}
+          </span>
         </div>
-      </div>
-      
-      <div class="form-row">
-        <div class="form-group">
-          <label>页面名称 (中文) <span class="required">*</span></label>
+        
+        <div class="form-field">
+          <label>
+            页面名称 (中文)
+            <span class="required">*</span>
+          </label>
           <input 
             v-model="localConfig.name['zh-CN']"
-            class="input"
+            type="text"
+            class="form-input"
             :class="{ error: errors.name_zh }"
             placeholder="例如: 首页、用户中心"
             @input="handleChange"
           />
-          <p v-if="errors.name_zh" class="error-text">{{ errors.name_zh }}</p>
+          <span v-if="errors.name_zh" class="field-hint error">{{ errors.name_zh }}</span>
         </div>
         
-        <div class="form-group">
-          <label>Page Name (EN) <span class="required">*</span></label>
+        <div class="form-field">
+          <label>
+            Page Name (EN)
+            <span class="required">*</span>
+          </label>
           <input 
             v-model="localConfig.name.en"
-            class="input"
+            type="text"
+            class="form-input"
             :class="{ error: errors.name_en }"
             placeholder="e.g. Home Page, User Profile"
             @input="handleChange"
           />
-          <p v-if="errors.name_en" class="error-text">{{ errors.name_en }}</p>
+          <span v-if="errors.name_en" class="field-hint error">{{ errors.name_en }}</span>
         </div>
-      </div>
-      
-      <div class="form-row">
-        <div class="form-group full">
+        
+        <div class="form-field full-width">
           <label>页面描述 (中文)</label>
           <textarea 
             v-model="localConfig.description['zh-CN']"
-            class="textarea"
+            class="form-textarea"
             rows="3"
             placeholder="描述此页面的功能和用户可执行的操作..."
             @input="handleChange"
           ></textarea>
         </div>
-      </div>
-      
-      <div class="form-row">
-        <div class="form-group full">
+        
+        <div class="form-field full-width">
           <label>Page Description (EN)</label>
           <textarea 
             v-model="localConfig.description.en"
-            class="textarea"
+            class="form-textarea"
             rows="3"
             placeholder="Describe the page features and available user actions..."
             @input="handleChange"
@@ -74,10 +88,23 @@
     
     <!-- 页面能力区 -->
     <section class="section">
-      <h3 class="section-title">🎯 页面能力</h3>
+      <div class="section-header">
+        <div class="section-icon accent">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="7" height="7"/>
+            <rect x="14" y="3" width="7" height="7"/>
+            <rect x="14" y="14" width="7" height="7"/>
+            <rect x="3" y="14" width="7" height="7"/>
+          </svg>
+        </div>
+        <h3>页面能力</h3>
+      </div>
       
-      <div class="form-group">
-        <label>可点击按钮 <span class="required">*</span></label>
+      <div class="form-field">
+        <label>
+          可点击按钮
+          <span class="required">*</span>
+        </label>
         <div class="list-editor">
           <div 
             v-for="(btn, index) in localConfig.button_list" 
@@ -86,28 +113,35 @@
           >
             <input 
               v-model="localConfig.button_list[index]"
-              class="input"
+              type="text"
+              class="form-input"
               placeholder="按钮 ID (snake_case)"
               @input="handleChange"
             />
             <button 
-              class="btn-icon"
+              v-if="localConfig.button_list.length > 1"
+              class="remove-btn"
               @click="removeButton(index)"
-              :disabled="localConfig.button_list.length <= 1"
-              :title="localConfig.button_list.length <= 1 ? '至少保留一个按钮' : '删除'"
+              type="button"
             >
-              ✕
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M15 9l-6 6M9 9l6 6"/>
+              </svg>
             </button>
           </div>
-          
-          <button class="btn-add" @click="addButton">
-            + 添加按钮
+          <button class="add-btn" @click="addButton" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M12 8v8M8 12h8"/>
+            </svg>
+            添加按钮
           </button>
         </div>
-        <p v-if="errors.button_list" class="error-text">{{ errors.button_list }}</p>
+        <span v-if="errors.button_list" class="field-hint error">{{ errors.button_list }}</span>
       </div>
       
-      <div class="form-group">
+      <div class="form-field">
         <label>可选操作</label>
         <div class="list-editor">
           <div 
@@ -117,17 +151,28 @@
           >
             <input 
               v-model="localConfig.optional_actions[index]"
-              class="input"
+              type="text"
+              class="form-input"
               placeholder="操作 ID"
               @input="handleChange"
             />
-            <button class="btn-icon" @click="removeAction(index)">
-              ✕
+            <button 
+              class="remove-btn"
+              @click="removeAction(index)"
+              type="button"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M15 9l-6 6M9 9l6 6"/>
+              </svg>
             </button>
           </div>
-          
-          <button class="btn-add" @click="addAction">
-            + 添加操作
+          <button class="add-btn" @click="addAction" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M12 8v8M8 12h8"/>
+            </svg>
+            添加操作
           </button>
         </div>
       </div>
@@ -135,28 +180,37 @@
     
     <!-- AI 上下文区 -->
     <section class="section">
-      <h3 class="section-title">🤖 AI 上下文</h3>
-      
-      <div class="form-group">
-        <label>行为规则</label>
-        <textarea 
-          v-model="localConfig.ai_context.behavior_rules"
-          class="textarea"
-          rows="3"
-          placeholder="定义 AI 在此页面的行为规则..."
-          @input="handleChange"
-        ></textarea>
+      <div class="section-header">
+        <div class="section-icon success">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2a2 2 0 012 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 017 7h1a1 1 0 110 2h-1.07A7 7 0 0113 23a7 7 0 01-7.07-7H5a1 1 0 110-2h1a7 7 0 017-7h1V5.73A2 2 0 0112 2z"/>
+          </svg>
+        </div>
+        <h3>AI 上下文</h3>
       </div>
       
-      <div class="form-group">
-        <label>页面目标</label>
-        <textarea 
-          v-model="localConfig.ai_context.page_goal"
-          class="textarea"
-          rows="2"
-          placeholder="定义 AI 应该帮助用户达成的目标..."
-          @input="handleChange"
-        ></textarea>
+      <div class="form-grid">
+        <div class="form-field full-width">
+          <label>行为规则</label>
+          <textarea 
+            v-model="localConfig.ai_context.behavior_rules"
+            class="form-textarea"
+            rows="3"
+            placeholder="定义 AI 在此页面的行为规则..."
+            @input="handleChange"
+          ></textarea>
+        </div>
+        
+        <div class="form-field full-width">
+          <label>页面目标</label>
+          <textarea 
+            v-model="localConfig.ai_context.page_goal"
+            class="form-textarea"
+            rows="2"
+            placeholder="定义 AI 应该帮助用户达成的目标..."
+            @input="handleChange"
+          ></textarea>
+        </div>
       </div>
     </section>
   </div>
@@ -236,14 +290,12 @@ const handleChange = () => {
   })
 }
 
-// 添加/删除按钮 (REQ-M5-005, REQ-M5-006, REQ-M5-009)
 const addButton = () => {
   localConfig.button_list.push('')
   handleChange()
 }
 
 const removeButton = (index) => {
-  // REQ-M5-009: 至少保留一个按钮
   if (localConfig.button_list.length <= 1) {
     return
   }
@@ -264,95 +316,203 @@ const removeAction = (index) => {
 
 <style lang="scss" scoped>
 .config-editor {
-  .section {
-    margin-bottom: 32px;
-    padding-bottom: 32px;
-    border-bottom: 1px solid var(--border-color);
-    
-    &:last-child {
-      margin-bottom: 0;
-      padding-bottom: 0;
-      border-bottom: none;
-    }
-  }
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.section {
+  padding: 20px;
+  background: var(--bg-subtle);
+  border-radius: 12px;
   
-  .section-title {
-    font-size: 15px;
-    font-weight: 600;
-    margin-bottom: 20px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
+  &:hover {
+    background: rgba(241, 245, 249, 0.8);
   }
 }
 
-.form-row {
+.section-header {
   display: flex;
-  gap: 16px;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
   
-  .form-group {
-    flex: 1;
+  h3 {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-heading);
+    margin: 0;
+  }
+}
+
+.section-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--primary-light);
+  
+  svg {
+    width: 18px;
+    height: 18px;
+    color: var(--primary);
+  }
+  
+  &.accent {
+    background: var(--accent-light);
+    svg { color: var(--accent); }
+  }
+  
+  &.success {
+    background: var(--success-light);
+    svg { color: var(--success); }
+  }
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  
+  &.full-width {
+    grid-column: 1 / -1;
+  }
+  
+  label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
     
-    &.full {
-      flex: 1 1 100%;
+    .required {
+      color: var(--error);
+      margin-left: 2px;
     }
+  }
+}
+
+.form-input,
+.form-textarea {
+  width: 100%;
+  padding: 10px 14px;
+  font-size: 14px;
+  font-family: var(--font-sans);
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  outline: none;
+  transition: all 0.2s;
+  
+  &::placeholder {
+    color: var(--text-muted);
+  }
+  
+  &:hover:not(:disabled) {
+    border-color: #cbd5e1;
+  }
+  
+  &:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-light);
+    background: white;
+  }
+  
+  &.error {
+    border-color: var(--error);
+    
+    &:focus {
+      box-shadow: 0 0 0 3px var(--error-light);
+    }
+  }
+}
+
+.form-textarea {
+  resize: vertical;
+  min-height: 80px;
+  line-height: 1.6;
+}
+
+.field-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  
+  &.error {
+    color: var(--error);
   }
 }
 
 .list-editor {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .list-item {
   display: flex;
-  gap: 8px;
+  gap: 10px;
+  align-items: center;
   
-  .input {
+  .form-input {
     flex: 1;
   }
 }
 
-.btn-icon {
+.remove-btn {
   width: 36px;
   height: 36px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-secondary);
+  background: var(--bg-elevated);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  color: var(--text-secondary);
+  border-radius: 10px;
+  color: var(--text-muted);
   cursor: pointer;
   transition: all 0.2s;
   
-  &:hover:not(:disabled) {
-    border-color: var(--error);
-    color: var(--error);
-    background: rgba(239, 68, 68, 0.1);
+  svg {
+    width: 18px;
+    height: 18px;
   }
   
-  &:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
+  &:hover {
+    background: var(--error-light);
+    border-color: var(--error);
+    color: var(--error);
   }
 }
 
-.btn-add {
-  padding: 10px;
-  background: transparent;
-  border: 1px dashed var(--border-color);
-  border-radius: var(--radius-md);
-  color: var(--primary);
+.add-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
   font-size: 13px;
+  font-weight: 500;
+  color: var(--primary);
+  background: var(--bg-elevated);
+  border: 1px dashed var(--primary);
+  border-radius: 10px;
   cursor: pointer;
   transition: all 0.2s;
   
+  svg {
+    width: 18px;
+    height: 18px;
+  }
+  
   &:hover {
-    border-color: var(--primary);
     background: var(--primary-light);
   }
 }
 </style>
-
