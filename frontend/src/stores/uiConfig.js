@@ -1,0 +1,135 @@
+import { defineStore } from 'pinia'
+import { ref, computed } from 'vue'
+
+export const useUiConfigStore = defineStore('uiConfig', () => {
+  // 当前编辑的配置
+  const draftConfig = ref({
+    page_id: '',
+    name: { 'zh-CN': '', en: '' },
+    description: { 'zh-CN': '', en: '' },
+    button_list: [],
+    optional_actions: [],
+    ai_context: { behavior_rules: '', page_goal: '' }
+  })
+  
+  // 原始配置（用于比较是否修改）
+  const originalConfig = ref(null)
+  
+  // 用户是否有未保存的修改 (REQ-M3-013)
+  const isDirty = ref(false)
+  
+  // 当前解析会话
+  const currentSession = ref(null)
+  
+  // Toast 消息
+  const toast = ref(null)
+  
+  // 计算属性
+  const hasChanges = computed(() => isDirty.value)
+  
+  // 应用用户编辑
+  function applyUserEdit(patch) {
+    Object.assign(draftConfig.value, patch)
+    isDirty.value = true
+  }
+  
+  // 尝试应用 AI 更新 (REQ-M3-013)
+  function tryApplyAiUpdate(aiConfig) {
+    if (isDirty.value) {
+      // 有冲突，返回让 UI 层处理
+      return { conflict: true }
+    }
+    // 无冲突，直接应用
+    applyAiConfig(aiConfig)
+    return { conflict: false }
+  }
+  
+  // 强制应用 AI 更新（覆盖手动修改）
+  function forceApplyAiUpdate(aiConfig) {
+    applyAiConfig(aiConfig)
+    isDirty.value = false
+  }
+  
+  // 应用 AI 配置
+  function applyAiConfig(aiConfig) {
+    if (aiConfig.page_name) {
+      draftConfig.value.name = {
+        'zh-CN': aiConfig.page_name['zh-CN'] || '',
+        en: aiConfig.page_name.en || ''
+      }
+    }
+    if (aiConfig.page_description) {
+      draftConfig.value.description = {
+        'zh-CN': aiConfig.page_description['zh-CN'] || '',
+        en: aiConfig.page_description.en || ''
+      }
+    }
+    if (aiConfig.button_list) {
+      draftConfig.value.button_list = aiConfig.button_list
+    }
+    if (aiConfig.optional_actions) {
+      draftConfig.value.optional_actions = aiConfig.optional_actions
+    }
+    if (aiConfig.ai_context) {
+      draftConfig.value.ai_context = aiConfig.ai_context
+    }
+  }
+  
+  // 保留用户修改
+  function keepUserEdit() {
+    // 不做任何操作，保持 isDirty 状态
+  }
+  
+  // 重置配置
+  function resetConfig() {
+    draftConfig.value = {
+      page_id: '',
+      name: { 'zh-CN': '', en: '' },
+      description: { 'zh-CN': '', en: '' },
+      button_list: [],
+      optional_actions: [],
+      ai_context: { behavior_rules: '', page_goal: '' }
+    }
+    originalConfig.value = null
+    isDirty.value = false
+    currentSession.value = null
+  }
+  
+  // 设置原始配置
+  function setOriginalConfig(config) {
+    originalConfig.value = JSON.parse(JSON.stringify(config))
+    draftConfig.value = JSON.parse(JSON.stringify(config))
+    isDirty.value = false
+  }
+  
+  // 设置当前会话
+  function setCurrentSession(session) {
+    currentSession.value = session
+  }
+  
+  // 显示 Toast
+  function showToast(message, type = 'success', duration = 3000) {
+    toast.value = { message, type }
+    setTimeout(() => {
+      toast.value = null
+    }, duration)
+  }
+  
+  return {
+    draftConfig,
+    originalConfig,
+    isDirty,
+    currentSession,
+    toast,
+    hasChanges,
+    applyUserEdit,
+    tryApplyAiUpdate,
+    forceApplyAiUpdate,
+    keepUserEdit,
+    resetConfig,
+    setOriginalConfig,
+    setCurrentSession,
+    showToast
+  }
+})
+
