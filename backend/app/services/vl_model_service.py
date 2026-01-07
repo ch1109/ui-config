@@ -9,7 +9,7 @@ import httpx
 import base64
 import json
 import aiofiles
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, AsyncGenerator
 from urllib.parse import urlparse
 from app.schemas.vl_response import VLParseResult, ParsedElement
 from app.core.config import settings
@@ -111,6 +111,116 @@ class VLModelService:
         
         return self._build_parse_result(parsed_data)
     
+    async def parse_image_stream(
+        self, 
+        image_url: str, 
+        system_prompt: str
+    ) -> AsyncGenerator[str, None]:
+        """
+        流式解析页面截图
+        
+        Args:
+            image_url: 图片路径或 URL
+            system_prompt: System Prompt 内容
+            
+        Yields:
+            str: SSE 格式的流式数据
+        """
+        try:
+            # 读取并编码图片
+            image_base64 = await self._load_image(image_url)
+            
+            # 根据 provider 构建不同格式的请求
+            if self.provider == "zhipu":
+                messages = self._build_zhipu_messages(image_base64, system_prompt)
+                request_body = self._build_zhipu_request(messages, stream=True)
+            elif self.provider == "dashscope":
+                messages = self._build_dashscope_messages(image_base64, system_prompt)
+                request_body = self._build_dashscope_request(messages, stream=True)
+            else:
+                messages = self._build_openai_messages(image_base64, system_prompt)
+                request_body = self._build_openai_request(messages, stream=True)
+            
+            logger.info(f"Calling VL model (stream): {self.provider} / {self.model_name}")
+            
+            accumulated_content = ""
+            
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                headers = {
+                    "Content-Type": "application/json"
+                }
+                if self.api_key:
+                    headers["Authorization"] = f"Bearer {self.api_key}"
+                
+                logger.info(f"Stream request to: {self.api_endpoint}")
+                logger.info(f"Stream enabled: {request_body.get('stream')}")
+                
+                async with client.stream(
+                    "POST",
+                    self.api_endpoint,
+                    json=request_body,
+                    headers=headers
+                ) as response:
+                    if response.status_code != 200:
+                        error_text = await response.aread()
+                        logger.error(f"VL API error {response.status_code}: {error_text}")
+                        yield f"data: {json.dumps({'error': f'API 错误: {response.status_code}'})}\n\n"
+                        return
+                    
+                    # 发送开始事件
+                    logger.info("Stream response started, sending start event")
+                    yield f"data: {json.dumps({'type': 'start', 'message': '正在分析图片...'})}\n\n"
+                    
+                    chunk_count = 0
+                    async for line in response.aiter_lines():
+                        if not line.strip():
+                            continue
+                        
+                        logger.debug(f"Raw stream line: {line[:100]}...")
+                        
+                        if line.startswith("data: "):
+                            data_str = line[6:]
+                            
+                            if data_str.strip() == "[DONE]":
+                                logger.info(f"Stream completed with {chunk_count} chunks")
+                                break
+                            
+                            try:
+                                chunk = json.loads(data_str)
+                                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                                content = delta.get("content", "")
+                                
+                                if content:
+                                    chunk_count += 1
+                                    accumulated_content += content
+                                    # 发送内容片段
+                                    logger.debug(f"Chunk {chunk_count}: {content[:50]}...")
+                                    yield f"data: {json.dumps({'type': 'content', 'content': content})}\n\n"
+                            except json.JSONDecodeError as e:
+                                logger.warning(f"JSON decode error: {e}, line: {data_str[:100]}")
+                                continue
+                        else:
+                            # 非标准 SSE 格式，可能是直接返回的 JSON
+                            logger.warning(f"Non-SSE line: {line[:100]}")
+            
+            # 尝试解析完整的 JSON
+            logger.debug(f"Accumulated content length: {len(accumulated_content)}")
+            
+            try:
+                parsed_data = await self._parse_accumulated_content(messages, accumulated_content)
+                result = self._build_parse_result(parsed_data)
+                
+                # 发送完成事件
+                yield f"data: {json.dumps({'type': 'complete', 'result': result.model_dump()})}\n\n"
+                
+            except Exception as e:
+                logger.error(f"Failed to parse accumulated content: {e}")
+                yield f"data: {json.dumps({'type': 'error', 'message': f'解析失败: {str(e)}'})}\n\n"
+                
+        except Exception as e:
+            logger.error(f"Stream parsing error: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+    
     def _build_zhipu_messages(self, image_base64: str, system_prompt: str) -> list:
         """构建智谱 GLM-4V 格式的消息"""
         return [
@@ -183,33 +293,38 @@ class VLModelService:
             }
         ]
     
-    def _build_zhipu_request(self, messages: list) -> dict:
+    def _build_zhipu_request(self, messages: list, stream: bool = False) -> dict:
         """构建智谱 API 请求体"""
         return {
             "model": self.model_name,
             "messages": messages,
             "max_tokens": 4096,
-            "temperature": 0.1
+            "temperature": 0.1,
+            "stream": stream
         }
     
-    def _build_dashscope_request(self, messages: list) -> dict:
+    def _build_dashscope_request(self, messages: list, stream: bool = False) -> dict:
         """构建 DashScope API 请求体"""
         return {
             "model": self.model_name,
             "messages": messages,
             "max_tokens": 4096,
-            "temperature": 0.1
+            "temperature": 0.1,
+            "stream": stream
         }
     
-    def _build_openai_request(self, messages: list) -> dict:
+    def _build_openai_request(self, messages: list, stream: bool = False) -> dict:
         """构建 OpenAI 兼容 API 请求体"""
-        return {
+        request = {
             "model": self.model_name,
             "messages": messages,
             "max_tokens": 4096,
             "temperature": 0.1,
-            "response_format": {"type": "json_object"}
+            "stream": stream
         }
+        if not stream:
+            request["response_format"] = {"type": "json_object"}
+        return request
     
     async def _load_image(self, image_url: str) -> str:
         """加载图片并转为 base64"""
@@ -374,6 +489,29 @@ class VLModelService:
             
             return json.loads(retry_content.strip())
     
+    async def _parse_accumulated_content(self, messages: list, content: str) -> dict:
+        """
+        解析流式输出累积的内容
+        类似 _parse_json_with_retry，但专门用于流式输出
+        """
+        json_content = content.strip()
+        
+        # 去除 markdown 代码块
+        if json_content.startswith("```json"):
+            json_content = json_content[7:]
+        elif json_content.startswith("```"):
+            json_content = json_content[3:]
+        if json_content.endswith("```"):
+            json_content = json_content[:-3]
+        json_content = json_content.strip()
+        
+        try:
+            return json.loads(json_content)
+        except json.JSONDecodeError as e:
+            logger.warning(f"JSON parse failed in stream, retrying: {e}")
+            # 对于流式输出，如果解析失败，可以尝试重新请求
+            return await self._parse_json_with_retry(messages, content)
+    
     def _is_safe_url(self, url: str) -> bool:
         """
         SSRF 防护检查 (Demo 简化版)
@@ -479,3 +617,110 @@ class VLModelService:
         parsed_data = await self._parse_json_with_retry(messages, content)
         
         return self._build_parse_result(parsed_data)
+    
+    async def clarify_stream(
+        self,
+        image_url: str,
+        previous_result: dict,
+        clarify_history: list,
+        user_response: str,
+        system_prompt: str
+    ) -> AsyncGenerator[str, None]:
+        """
+        基于用户回答进行澄清并更新配置 (流式)
+        用于模块 M3 的多轮澄清对话
+        """
+        try:
+            image_base64 = await self._load_image(image_url)
+            
+            # 构建包含历史的对话
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}},
+                        {"type": "text", "text": self._build_parse_prompt()}
+                    ]
+                },
+                {"role": "assistant", "content": json.dumps(previous_result, ensure_ascii=False)}
+            ]
+            
+            # 添加澄清历史
+            for item in clarify_history:
+                messages.append({"role": "user", "content": item.get("question", "")})
+                messages.append({"role": "assistant", "content": item.get("answer", "")})
+            
+            # 添加当前用户回答
+            messages.append({
+                "role": "user",
+                "content": f"用户回答: {user_response}\n\n请基于这个信息更新配置，并判断是否还需要继续澄清。只输出 JSON。"
+            })
+            
+            # 根据 provider 构建请求
+            if self.provider == "zhipu":
+                request_body = self._build_zhipu_request(messages, stream=True)
+            elif self.provider == "dashscope":
+                request_body = self._build_dashscope_request(messages, stream=True)
+            else:
+                request_body = self._build_openai_request(messages, stream=True)
+            
+            accumulated_content = ""
+            
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                headers = {"Content-Type": "application/json"}
+                if self.api_key:
+                    headers["Authorization"] = f"Bearer {self.api_key}"
+                
+                async with client.stream(
+                    "POST",
+                    self.api_endpoint,
+                    json=request_body,
+                    headers=headers
+                ) as response:
+                    if response.status_code != 200:
+                        error_text = await response.aread()
+                        logger.error(f"VL API error {response.status_code}: {error_text}")
+                        yield f"data: {json.dumps({'error': f'API 错误: {response.status_code}'})}\n\n"
+                        return
+                    
+                    # 发送开始事件
+                    yield f"data: {json.dumps({'type': 'start', 'message': '正在处理您的回答...'})}\n\n"
+                    
+                    async for line in response.aiter_lines():
+                        if not line.strip():
+                            continue
+                        
+                        if line.startswith("data: "):
+                            data_str = line[6:]
+                            
+                            if data_str.strip() == "[DONE]":
+                                break
+                            
+                            try:
+                                chunk = json.loads(data_str)
+                                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                                content = delta.get("content", "")
+                                
+                                if content:
+                                    accumulated_content += content
+                                    # 发送内容片段
+                                    yield f"data: {json.dumps({'type': 'content', 'content': content})}\n\n"
+                            except json.JSONDecodeError:
+                                continue
+            
+            # 尝试解析完整的 JSON
+            try:
+                parsed_data = await self._parse_accumulated_content(messages, accumulated_content)
+                result = self._build_parse_result(parsed_data)
+                
+                # 发送完成事件
+                yield f"data: {json.dumps({'type': 'complete', 'result': result.model_dump()})}\n\n"
+                
+            except Exception as e:
+                logger.error(f"Failed to parse accumulated content: {e}")
+                yield f"data: {json.dumps({'type': 'error', 'message': f'解析失败: {str(e)}'})}\n\n"
+                
+        except Exception as e:
+            logger.error(f"Stream clarify error: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"

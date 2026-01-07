@@ -32,15 +32,23 @@
               @click="previewImage(item.image)"
             />
             <span v-html="formatMessage(item.content)"></span>
+            <!-- 流式输入光标 -->
+            <span v-if="item.isStreaming" class="streaming-cursor">▊</span>
           </div>
           <span class="timestamp">{{ formatTime(item.timestamp) }}</span>
         </div>
       </template>
       
-      <!-- 解析中状态 -->
+      <!-- 解析中状态 - 显示流式内容 -->
       <div v-if="status === 'parsing'" class="message assistant">
         <div class="bubble">
-          👋 你好！我正在分析页面截图，识别可交互元素...
+          <template v-if="streamingContent">
+            <pre class="streaming-output">{{ streamingContent }}</pre>
+            <span class="streaming-cursor">▊</span>
+          </template>
+          <template v-else>
+            👋 你好！我正在分析页面截图，识别可交互元素...
+          </template>
         </div>
       </div>
       
@@ -202,7 +210,8 @@ const props = defineProps({
   parseResult: Object,
   status: String,
   currentConfig: Object,
-  imageUrl: String
+  imageUrl: String,
+  streamingContent: String  // 流式输出的实时内容
 })
 
 const emit = defineEmits(['config-updated', 'config-confirmed', 'completed'])
@@ -281,6 +290,13 @@ watch(() => props.status, (newStatus, oldStatus) => {
     if (props.parseResult.clarification_questions?.length > 0) {
       currentQuestion.value = props.parseResult.clarification_questions[0]
     }
+    scrollToBottom()
+  }
+})
+
+// 监听流式内容变化，自动滚动到底部
+watch(() => props.streamingContent, () => {
+  if (props.streamingContent) {
     scrollToBottom()
   }
 })
@@ -384,24 +400,60 @@ const sendMessage = async () => {
   
   try {
     if (props.sessionId && (props.status === 'clarifying' || props.status === 'completed')) {
-      // 使用聊天接口进行配置修改
-      const response = await clarifyApi.chat(props.sessionId, {
-        message: userMessage,
-        current_config: props.currentConfig
-      })
+      // 使用流式聊天接口
+      let accumulatedContent = ''
       
+      // 添加一个临时的 AI 消息用于显示流式内容
+      const aiMessageIndex = chatHistory.value.length
       chatHistory.value.push({
         role: 'assistant',
-        content: response.message || '好的，我已根据您的建议更新了配置。',
-        timestamp: new Date()
+        content: '',
+        timestamp: new Date(),
+        isStreaming: true
       })
       
-      if (response.updated_config) {
-        // 显示更新后的配置概览
-        pendingConfig.value = response.updated_config
-        showConfigPreview.value = true
-        configConfirmed.value = false
-      }
+      const stream = clarifyApi.chatStream(
+        props.sessionId,
+        userMessage,
+        props.currentConfig,
+        // onMessage
+        (data) => {
+          if (data.type === 'start') {
+            console.log('开始处理:', data.message)
+          } else if (data.type === 'content') {
+            accumulatedContent += data.content
+            // 实时更新消息内容
+            chatHistory.value[aiMessageIndex].content = accumulatedContent
+            scrollToBottom()
+          }
+        },
+        // onComplete
+        (result) => {
+          // 移除流式标记
+          chatHistory.value[aiMessageIndex].isStreaming = false
+          chatHistory.value[aiMessageIndex].content = accumulatedContent || '好的，我已根据您的建议更新了配置。'
+          
+          if (result) {
+            // 显示更新后的配置概览
+            pendingConfig.value = result
+            showConfigPreview.value = true
+            configConfirmed.value = false
+          }
+          isLoading.value = false
+          scrollToBottom()
+        },
+        // onError
+        (error) => {
+          chatHistory.value[aiMessageIndex].isStreaming = false
+          chatHistory.value[aiMessageIndex].content = `❌ ${error || '请求失败，请重试'}`
+          isLoading.value = false
+          scrollToBottom()
+        }
+      )
+      
+      // 保存引用以便清理
+      window._currentChatStream = stream
+      
     } else {
       // 没有会话时的通用回复
       chatHistory.value.push({
@@ -409,6 +461,7 @@ const sendMessage = async () => {
         content: '请先上传页面截图并点击"AI 辅助填写"，我会帮您识别页面元素。',
         timestamp: new Date()
       })
+      isLoading.value = false
     }
     
   } catch (error) {
@@ -418,8 +471,8 @@ const sendMessage = async () => {
       content: `❌ ${error.response?.data?.message || '请求失败，请重试'}`,
       timestamp: new Date()
     })
-  } finally {
     isLoading.value = false
+  } finally {
     scrollToBottom()
   }
 }
@@ -668,6 +721,33 @@ const formatTime = (date) => {
 @keyframes bounce {
   0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
   40% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.streaming-cursor {
+  display: inline-block;
+  margin-left: 2px;
+  animation: blink 1s infinite;
+  color: var(--primary);
+  font-weight: bold;
+}
+
+.streaming-output {
+  margin: 0;
+  padding: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  max-height: 300px;
+  overflow-y: auto;
+  background: transparent;
+  color: inherit;
 }
 
 .timestamp {

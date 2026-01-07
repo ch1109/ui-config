@@ -5,6 +5,7 @@
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List, Optional
@@ -14,7 +15,7 @@ from datetime import datetime
 import asyncio
 import logging
 
-from app.database import get_db
+from app.database import get_db, AsyncSessionLocal
 from app.schemas.page_config import (
     PageConfigCreate, PageConfigUpdate, PageConfigResponse, PageConfigListItem,
     MultiLangText, AIContext
@@ -148,6 +149,96 @@ async def trigger_ai_parse(
         "message": "AI 正在分析页面...",
         "estimated_time_seconds": 30
     }
+
+
+@router.get("/parse-stream")
+async def trigger_ai_parse_stream(
+    image_url: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    流式 AI 解析页面截图 (SSE)
+    
+    - 实时返回解析进度
+    - 支持流式输出
+    - 提升用户体验
+    
+    对应需求: REQ-M2-007, REQ-M2-014, REQ-M2-015
+    """
+    # 验证图片是否存在
+    if not image_url:
+        raise ImageRequiredError()
+    
+    # 验证 URL 格式
+    if not (image_url.startswith(("http://", "https://")) or image_url.startswith("/uploads/")):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "INVALID_IMAGE_URL",
+                "message": "仅支持 http/https URL 或本地 uploads 路径"
+            }
+        )
+    
+    # 创建解析会话
+    session_id = str(uuid.uuid4())
+    session = ParseSession(
+        session_id=session_id,
+        image_path=image_url,
+        status=SessionStatus.PARSING.value
+    )
+    db.add(session)
+    await db.commit()
+    session_id_str = str(session_id)
+    
+    async def stream_generator():
+        """流式生成器"""
+        async with AsyncSessionLocal() as stream_db:
+            try:
+                # 获取 System Prompt
+                prompt_service = SystemPromptService(stream_db)
+                system_prompt = await prompt_service.get_current_prompt()
+                
+                # 调用 VL 模型流式接口
+                vl_service = VLModelService()
+                
+                async for chunk in vl_service.parse_image_stream(
+                    image_url=image_url,
+                    system_prompt=system_prompt.prompt_content
+                ):
+                    yield chunk
+                
+                # 获取最新会话状态
+                result = await stream_db.execute(
+                    select(ParseSession).where(ParseSession.session_id == session_id_str)
+                )
+                session = result.scalar_one_or_none()
+                
+                if session and session.status == SessionStatus.PARSING.value:
+                    # 更新状态为已完成
+                    session.status = SessionStatus.COMPLETED.value
+                    await stream_db.commit()
+                    
+            except Exception as e:
+                logger.exception(f"Stream parse error for session {session_id_str}: {e}")
+                # 更新状态为失败
+                result = await stream_db.execute(
+                    select(ParseSession).where(ParseSession.session_id == session_id_str)
+                )
+                session = result.scalar_one_or_none()
+                if session:
+                    session.status = SessionStatus.FAILED.value
+                    session.error_message = str(e)
+                    await stream_db.commit()
+    
+    return StreamingResponse(
+        stream_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
 
 
 async def execute_parse(session_id: str, image_url: str):

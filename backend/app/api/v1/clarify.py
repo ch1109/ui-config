@@ -5,14 +5,16 @@
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
 import asyncio
+import json
 
-from app.database import get_db
+from app.database import get_db, AsyncSessionLocal
 from app.models.parse_session import ParseSession, SessionStatus
 from app.services.vl_model_service import VLModelService
 from app.services.system_prompt_service import SystemPromptService
@@ -302,4 +304,91 @@ async def chat_for_config_modification(
             "status": "error",
             "message": f"处理失败: {str(e)}"
         }
+
+
+@router.post("/{session_id}/chat-stream")
+async def chat_for_config_modification_stream(
+    session_id: str,
+    request: ChatRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    通用聊天接口 - 流式输出 (用于配置修改建议)
+    
+    用户可以在配置生成后继续与 AI 交互，提出修改建议
+    AI 会根据用户的建议实时更新配置
+    """
+    result = await db.execute(
+        select(ParseSession).where(ParseSession.session_id == session_id)
+    )
+    session = result.scalar_one_or_none()
+    
+    if not session:
+        raise SessionNotFoundError(session_id)
+    
+    # 保存请求信息
+    image_path = session.image_path
+    current_config = request.current_config or session.parse_result or {}
+    clarify_history = session.clarify_history or []
+    user_message = request.message
+    session_id_str = str(session_id)
+    
+    async def stream_generator():
+        """流式生成器"""
+        async with AsyncSessionLocal() as stream_db:
+            try:
+                # 获取系统提示词
+                prompt_service = SystemPromptService(stream_db)
+                system_prompt = await prompt_service.get_current_prompt()
+                vl_service = VLModelService()
+                
+                # 更新澄清历史
+                new_history = clarify_history + [{
+                    "question": "用户修改建议",
+                    "answer": user_message,
+                    "timestamp": datetime.utcnow().isoformat()
+                }]
+                
+                # 调用流式接口
+                async for chunk in vl_service.clarify_stream(
+                    image_url=image_path,
+                    previous_result=current_config,
+                    clarify_history=new_history,
+                    user_response=f"用户的修改建议: {user_message}",
+                    system_prompt=system_prompt.prompt_content
+                ):
+                    # 如果是完成事件,更新数据库
+                    if '"type": "complete"' in chunk:
+                        try:
+                            data = json.loads(chunk.replace("data: ", "").strip())
+                            if data.get("type") == "complete":
+                                result = await stream_db.execute(
+                                    select(ParseSession).where(ParseSession.session_id == session_id_str)
+                                )
+                                db_session = result.scalar_one_or_none()
+                                if db_session:
+                                    db_session.parse_result = data["result"]
+                                    db_session.clarify_history = new_history
+                                    db_session.confidence = data["result"].get("overall_confidence", 0) * 100
+                                    await stream_db.commit()
+                        except Exception as e:
+                            import logging
+                            logging.error(f"Failed to update session: {e}")
+                    
+                    yield chunk
+                    
+            except Exception as e:
+                import logging
+                logging.exception(f"Stream chat error: {e}")
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        stream_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
 

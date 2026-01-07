@@ -80,6 +80,7 @@
           :status="parseStatus"
           :current-config="store.draftConfig"
           :image-url="imageUrl"
+          :streaming-content="streamingContent"
           @config-updated="onAIConfigUpdated"
           @config-confirmed="onAIConfigConfirmed"
           @completed="onAICompleted"
@@ -138,6 +139,7 @@ const showAIPanel = ref(false)
 const showConflictDialog = ref(false)
 const pendingAIConfig = ref(null)
 const validationErrors = ref({})
+const streamingContent = ref('')  // 流式输出的实时内容
 
 // 轮询定时器
 let pollTimer = null
@@ -201,13 +203,40 @@ const handleAIParse = async () => {
   isParsing.value = true
   showAIPanel.value = true
   parseStatus.value = 'parsing'
+  streamingContent.value = ''  // 重置流式内容
   
   try {
-    const response = await pageConfigApi.parse(imageUrl.value)
-    currentSessionId.value = response.session_id
+    const stream = pageConfigApi.parseStream(
+      imageUrl.value,
+      // onMessage - 实时接收流式数据
+      (data) => {
+        if (data.type === 'start') {
+          console.log('开始解析:', data.message)
+        } else if (data.type === 'content') {
+          // 实时更新流式内容
+          streamingContent.value += data.content
+        }
+      },
+      // onComplete - 解析完成
+      (result) => {
+        isParsing.value = false
+        parseStatus.value = 'completed'
+        parseResult.value = result
+        streamingContent.value = ''  // 清空流式内容
+        store.showToast('AI 解析完成')
+      },
+      // onError - 错误处理
+      (error) => {
+        isParsing.value = false
+        parseStatus.value = 'failed'
+        streamingContent.value = ''
+        store.showToast(error || '解析失败', 'error')
+      }
+    )
     
-    // 开始轮询状态
-    startPolling()
+    // 保存引用以便清理
+    window._currentParseStream = stream
+    
   } catch (error) {
     isParsing.value = false
     parseStatus.value = 'failed'

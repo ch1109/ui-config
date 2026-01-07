@@ -53,7 +53,78 @@ export const pageConfigApi = {
   
   // AI 解析
   parse: (imageUrl) => api.post('/pages/parse', null, { params: { image_url: imageUrl } }),
-  getParseStatus: (sessionId) => api.get(`/pages/parse/${sessionId}/status`)
+  getParseStatus: (sessionId) => api.get(`/pages/parse/${sessionId}/status`),
+  
+  // AI 解析 - 流式输出 (使用 fetch 处理 SSE)
+  parseStream: (imageUrl, onMessage, onComplete, onError) => {
+    const controller = new AbortController()
+    
+    fetch(`/api/v1/pages/parse-stream?image_url=${encodeURIComponent(imageUrl)}`, {
+      method: 'GET',
+      headers: {
+        'Accept': 'text/event-stream'
+      },
+      signal: controller.signal
+    }).then(async response => {
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      
+      while (true) {
+        const { done, value } = await reader.read()
+        
+        if (done) {
+          break
+        }
+        
+        buffer += decoder.decode(value, { stream: true })
+        
+        // 处理可能包含多个事件的 buffer
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || '' // 保留未完成的行
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const dataStr = line.substring(6).trim()
+            if (!dataStr) continue
+            
+            try {
+              const data = JSON.parse(dataStr)
+              
+              if (data.type === 'start') {
+                onMessage && onMessage({ type: 'start', message: data.message })
+              } else if (data.type === 'content') {
+                onMessage && onMessage({ type: 'content', content: data.content })
+              } else if (data.type === 'complete') {
+                onComplete && onComplete(data.result)
+                return
+              } else if (data.type === 'error') {
+                onError && onError(data.message)
+                return
+              }
+            } catch (e) {
+              // 忽略解析错误
+              console.debug('Parse error for line:', dataStr)
+            }
+          }
+        }
+      }
+    }).catch(error => {
+      if (error.name !== 'AbortError') {
+        console.error('Fetch stream error:', error)
+        onError && onError('连接失败，请重试')
+      }
+    })
+    
+    // 返回可以取消的对象
+    return {
+      close: () => controller.abort()
+    }
+  }
 }
 
 // Clarify API
@@ -62,7 +133,83 @@ export const clarifyApi = {
   confirm: (sessionId, data) => api.post(`/clarify/${sessionId}/confirm`, data),
   getHistory: (sessionId) => api.get(`/clarify/${sessionId}/history`),
   // 通用聊天接口 - 用于配置修改建议
-  chat: (sessionId, data) => api.post(`/clarify/${sessionId}/chat`, data)
+  chat: (sessionId, data) => api.post(`/clarify/${sessionId}/chat`, data),
+  
+  // 通用聊天接口 - 流式输出 (使用 fetch 处理 SSE)
+  chatStream: (sessionId, message, currentConfig, onMessage, onComplete, onError) => {
+    const controller = new AbortController()
+    
+    fetch(`/api/v1/clarify/${sessionId}/chat-stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'text/event-stream'
+      },
+      body: JSON.stringify({
+        message: message,
+        current_config: currentConfig || {}
+      }),
+      signal: controller.signal
+    }).then(async response => {
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      
+      while (true) {
+        const { done, value } = await reader.read()
+        
+        if (done) {
+          break
+        }
+        
+        buffer += decoder.decode(value, { stream: true })
+        
+        // 处理可能包含多个事件的 buffer
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || '' // 保留未完成的行
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const dataStr = line.substring(6).trim()
+            if (!dataStr) continue
+            
+            try {
+              const data = JSON.parse(dataStr)
+              
+              if (data.type === 'start') {
+                onMessage && onMessage({ type: 'start', message: data.message })
+              } else if (data.type === 'content') {
+                onMessage && onMessage({ type: 'content', content: data.content })
+              } else if (data.type === 'complete') {
+                onComplete && onComplete(data.result)
+                return
+              } else if (data.type === 'error') {
+                onError && onError(data.message)
+                return
+              }
+            } catch (e) {
+              // 忽略解析错误
+              console.debug('Parse error for line:', dataStr)
+            }
+          }
+        }
+      }
+    }).catch(error => {
+      if (error.name !== 'AbortError') {
+        console.error('Fetch stream error:', error)
+        onError && onError('连接失败，请重试')
+      }
+    })
+    
+    // 返回可以取消的对象
+    return {
+      close: () => controller.abort()
+    }
+  }
 }
 
 // Config Generator API
