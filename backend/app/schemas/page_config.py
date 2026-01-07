@@ -55,6 +55,7 @@ class PageConfigBase(BaseModel):
 class PageConfigCreate(PageConfigBase):
     """创建页面配置请求"""
     screenshot_url: Optional[str] = None
+    project_id: Optional[int] = None
 
 
 class PageConfigUpdate(BaseModel):
@@ -65,6 +66,7 @@ class PageConfigUpdate(BaseModel):
     optional_actions: Optional[List[str]] = None
     ai_context: Optional[AIContext] = None
     screenshot_url: Optional[str] = None
+    project_id: Optional[int] = None
     
     @field_validator('button_list')
     @classmethod
@@ -84,6 +86,8 @@ class PageConfigResponse(BaseModel):
     optional_actions: List[str]
     ai_context: Optional[AIContext] = None
     screenshot_url: Optional[str] = None
+    project_id: Optional[int] = None
+    project_name: Optional[str] = None
     status: str
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -97,6 +101,8 @@ class PageConfigListItem(BaseModel):
     page_id: str
     name_zh: str
     status: str
+    project_id: Optional[int] = None
+    project_name: Optional[str] = None
     screenshot_url: Optional[str] = None
     updated_at: Optional[datetime] = None
 

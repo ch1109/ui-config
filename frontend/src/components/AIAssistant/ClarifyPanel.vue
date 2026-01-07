@@ -202,6 +202,19 @@
     <!-- Input Area -->
     <div class="input-area">
       <div class="input-wrapper">
+        <label class="upload-btn" :class="{ disabled: isLoading }">
+          <input 
+            type="file" 
+            accept="image/png,image/jpeg,.png,.jpg,.jpeg"
+            @change="handleImageUpload"
+            :disabled="isLoading"
+          />
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+        </label>
         <textarea
           ref="inputRef"
           v-model="inputText"
@@ -357,6 +370,21 @@ const beforeImageUpload = (file) => {
   }
   reader.readAsDataURL(file)
   return false
+}
+
+// 处理图片上传
+const handleImageUpload = (e) => {
+  const file = e.target.files?.[0]
+  if (file) {
+    // 验证文件类型
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg']
+    if (!allowedTypes.includes(file.type)) {
+      return
+    }
+    beforeImageUpload(file)
+  }
+  // 重置 input
+  e.target.value = ''
 }
 
 const removePendingImage = () => {
@@ -918,6 +946,41 @@ const formatTime = (date) => {
     &::placeholder {
       color: var(--text-muted);
     }
+  }
+}
+
+.upload-btn {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  
+  input {
+    display: none;
+  }
+  
+  svg {
+    width: 18px;
+    height: 18px;
+  }
+  
+  &:hover:not(.disabled) {
+    background: var(--bg-elevated);
+    color: var(--primary);
+    border-color: var(--primary);
+  }
+  
+  &.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
   }
 }
 

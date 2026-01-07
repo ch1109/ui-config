@@ -23,7 +23,7 @@ from app.core.exceptions import (
 from app.database import init_db, close_db
 
 # 导入路由
-from app.api.v1 import system_prompt, page_config, clarify, config_generator, mcp
+from app.api.v1 import system_prompt, project, page_config, clarify, config_generator, mcp
 
 # 配置日志
 logging.basicConfig(
@@ -84,6 +84,7 @@ app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads"
 
 # 注册 API 路由
 app.include_router(system_prompt.router)
+app.include_router(project.router)
 app.include_router(page_config.router)
 app.include_router(clarify.router)
 app.include_router(config_generator.router)

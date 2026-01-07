@@ -23,6 +23,7 @@ from app.schemas.page_config import (
 from app.schemas.vl_response import ParseStatusResponse, ClarifyQuestion
 from app.models.parse_session import ParseSession, SessionStatus
 from app.models.page_config import PageConfig
+from app.models.project import Project
 from app.services.vl_model_service import VLModelService
 from app.services.system_prompt_service import SystemPromptService
 from app.core.config import settings
@@ -356,18 +357,30 @@ async def get_parse_status(session_id: str, db: AsyncSession = Depends(get_db)):
 @router.get("", response_model=List[PageConfigListItem])
 async def list_pages(
     page_status: Optional[str] = None,
+    project_id: Optional[int] = None,
     skip: int = 0,
     limit: int = 20,
     db: AsyncSession = Depends(get_db)
 ):
-    """获取页面配置列表"""
-    query = select(PageConfig)
+    """获取页面配置列表，支持按项目筛选"""
+    # 使用 outerjoin 获取项目名称
+    query = select(PageConfig, Project.name.label("project_name")).outerjoin(
+        Project, PageConfig.project_id == Project.id
+    )
+    
     if page_status:
         query = query.where(PageConfig.status == page_status)
     
+    if project_id is not None:
+        if project_id == 0:
+            # project_id=0 表示筛选未分配项目的页面
+            query = query.where(PageConfig.project_id.is_(None))
+        else:
+            query = query.where(PageConfig.project_id == project_id)
+    
     query = query.offset(skip).limit(limit)
     result = await db.execute(query)
-    pages = result.scalars().all()
+    rows = result.all()
     
     return [
         PageConfigListItem(
@@ -375,10 +388,12 @@ async def list_pages(
             page_id=p.page_id,
             name_zh=p.name_zh,
             status=p.status,
+            project_id=p.project_id,
+            project_name=project_name,
             screenshot_url=p.screenshot_url,
             updated_at=p.updated_at
         )
-        for p in pages
+        for p, project_name in rows
     ]
 
 
@@ -386,15 +401,19 @@ async def list_pages(
 async def get_page(page_id: str, db: AsyncSession = Depends(get_db)):
     """获取单个页面配置"""
     result = await db.execute(
-        select(PageConfig).where(PageConfig.page_id == page_id)
+        select(PageConfig, Project.name.label("project_name"))
+        .outerjoin(Project, PageConfig.project_id == Project.id)
+        .where(PageConfig.page_id == page_id)
     )
-    page = result.scalar_one_or_none()
+    row = result.first()
     
-    if not page:
+    if not row:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"页面 '{page_id}' 不存在"
         )
+    
+    page, project_name = row
     
     return PageConfigResponse(
         id=page.id,
@@ -405,6 +424,8 @@ async def get_page(page_id: str, db: AsyncSession = Depends(get_db)):
         optional_actions=page.optional_actions or [],
         ai_context=AIContext(**page.ai_context) if page.ai_context else None,
         screenshot_url=page.screenshot_url,
+        project_id=page.project_id,
+        project_name=project_name,
         status=page.status,
         created_at=page.created_at,
         updated_at=page.updated_at
@@ -429,6 +450,20 @@ async def create_page(
             detail=f"页面 ID '{config.page_id}' 已存在"
         )
     
+    # 如果指定了项目，验证项目是否存在
+    project_name = None
+    if config.project_id:
+        project_result = await db.execute(
+            select(Project).where(Project.id == config.project_id)
+        )
+        project = project_result.scalar_one_or_none()
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"项目 ID {config.project_id} 不存在"
+            )
+        project_name = project.name
+    
     page = PageConfig(
         page_id=config.page_id,
         name_zh=config.name.zh_CN,
@@ -439,6 +474,7 @@ async def create_page(
         optional_actions=config.optional_actions,
         ai_context=config.ai_context.model_dump() if config.ai_context else None,
         screenshot_url=config.screenshot_url,
+        project_id=config.project_id,
         status="configured"
     )
     
@@ -455,6 +491,8 @@ async def create_page(
         optional_actions=page.optional_actions,
         ai_context=config.ai_context,
         screenshot_url=page.screenshot_url,
+        project_id=page.project_id,
+        project_name=project_name,
         status=page.status,
         created_at=page.created_at,
         updated_at=page.updated_at
@@ -495,8 +533,34 @@ async def update_page(
     if config.screenshot_url is not None:
         page.screenshot_url = config.screenshot_url
     
+    # 更新项目关联 (project_id 可以设为 null 来取消关联)
+    if config.project_id is not None:
+        if config.project_id == 0:
+            # project_id=0 表示取消项目关联
+            page.project_id = None
+        else:
+            # 验证项目是否存在
+            project_result = await db.execute(
+                select(Project).where(Project.id == config.project_id)
+            )
+            project = project_result.scalar_one_or_none()
+            if not project:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"项目 ID {config.project_id} 不存在"
+                )
+            page.project_id = config.project_id
+    
     await db.commit()
     await db.refresh(page)
+    
+    # 获取项目名称
+    project_name = None
+    if page.project_id:
+        project_result = await db.execute(
+            select(Project.name).where(Project.id == page.project_id)
+        )
+        project_name = project_result.scalar_one_or_none()
     
     return PageConfigResponse(
         id=page.id,
@@ -507,6 +571,8 @@ async def update_page(
         optional_actions=page.optional_actions or [],
         ai_context=AIContext(**page.ai_context) if page.ai_context else None,
         screenshot_url=page.screenshot_url,
+        project_id=page.project_id,
+        project_name=project_name,
         status=page.status,
         created_at=page.created_at,
         updated_at=page.updated_at

@@ -4,10 +4,64 @@ import axios from 'axios'
 const api = axios.create({
   baseURL: '/api/v1',
   timeout: 30000,
-  headers: {
-    'Content-Type': 'application/json'
-  }
 })
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Chrome/Edge 在上传本地文件时，如果文件在上传过程中被系统写入/修改（常见于刚保存的截图），
+ * 会直接中断请求并报 net::ERR_UPLOAD_FILE_CHANGED，Axios 会表现为 Network Error。
+ *
+ * 这里把 File/Blob 先读入内存，生成稳定的 Blob（并保留 filename），避免依赖磁盘文件句柄。
+ */
+async function toStableUploadPayload(file, options = {}) {
+  const {
+    // 给系统/同步盘一点时间把文件写完（常见于截图刚落盘）
+    initialDelayMs = 200,
+    // 总重试次数（含第一次）
+    maxAttempts = 5,
+    // 指数退避基准
+    retryBaseDelayMs = 200,
+  } = options
+
+  // 兼容：如果不是 Blob/File（极少见），直接返回让后续报错更清晰
+  if (!(file instanceof Blob)) return { blob: file, filename: undefined }
+
+  if (initialDelayMs > 0) await sleep(initialDelayMs)
+
+  let lastErr
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const ab = await file.arrayBuffer()
+      const blob = new Blob([ab], { type: file.type || 'application/octet-stream' })
+
+      // File 有 name；Blob 可能没有。FormData.append 第三个参数可强制 filename
+      const filename = typeof file.name === 'string' && file.name ? file.name : 'upload'
+      return { blob, filename }
+    } catch (e) {
+      lastErr = e
+
+      // NotReadableError：常见于文件仍在写入/被占用/权限瞬态问题，等一等重试往往就好了
+      const name = e?.name || e?.constructor?.name
+      if (name === 'NotReadableError' || name === 'AbortError') {
+        const delay = retryBaseDelayMs * Math.pow(2, attempt - 1)
+        await sleep(delay)
+        continue
+      }
+
+      // 其他错误直接抛出
+      throw e
+    }
+  }
+
+  // 重试耗尽：抛出更明确的信息，便于 UI 提示
+  const err = new Error('读取图片失败：文件可能仍在保存/被占用/权限受限，请稍等 1-2 秒后重试，或将图片复制到本地桌面再上传。')
+  err.cause = lastErr
+  err.name = 'NotReadableError'
+  throw err
+}
 
 // 响应拦截器
 api.interceptors.response.use(
@@ -28,6 +82,15 @@ export const systemPromptApi = {
   getStats: () => api.get('/system-prompt/stats')
 }
 
+// Project API
+export const projectApi = {
+  list: () => api.get('/projects'),
+  get: (projectId) => api.get(`/projects/${projectId}`),
+  create: (data) => api.post('/projects', data),
+  update: (projectId, data) => api.put(`/projects/${projectId}`, data),
+  delete: (projectId) => api.delete(`/projects/${projectId}`)
+}
+
 // Page Config API
 export const pageConfigApi = {
   list: (params) => api.get('/pages', { params }),
@@ -37,16 +100,50 @@ export const pageConfigApi = {
   delete: (pageId) => api.delete(`/pages/${pageId}`),
   
   // 图片上传
-  uploadImage: (file, onProgress) => {
+  uploadImage: async (file, onProgress) => {
+    // 先尝试稳定化读取文件到内存，避免后续上传时文件被系统修改
+    // 这对于刚保存的截图或从其他应用粘贴的图片特别重要
+    let stableBlob = null
+    let stableFilename = null
+    
+    try {
+      const stable = await toStableUploadPayload(file, {
+        initialDelayMs: 100,  // 给系统一点时间完成文件写入
+        maxAttempts: 5,
+        retryBaseDelayMs: 300
+      })
+      stableBlob = stable.blob
+      stableFilename = stable.filename
+    } catch (readError) {
+      // 如果稳定化读取失败，尝试直接上传原始文件（最后的手段）
+      console.warn('稳定化读取失败，尝试直接上传:', readError.message)
+      try {
+        const directForm = new FormData()
+        directForm.append('file', file)
+        return await api.post('/pages/upload-image', directForm, {
+          onUploadProgress: (e) => {
+            if (onProgress && e.total) onProgress(e.loaded / e.total)
+          }
+        })
+      } catch (uploadError) {
+        // 两种方式都失败了，抛出更友好的错误
+        const friendlyError = new Error(
+          readError.name === 'NotReadableError'
+            ? '读取图片失败：文件可能仍在保存中或被其他程序占用，请稍等 1-2 秒后重试，或将图片复制到桌面后上传。'
+            : uploadError.response?.data?.message || uploadError.message || '图片上传失败，请重试'
+        )
+        friendlyError.code = 'UPLOAD_FAILED'
+        throw friendlyError
+      }
+    }
+    
+    // 使用稳定化后的 Blob 上传
     const formData = new FormData()
-    formData.append('file', file)
+    formData.append('file', stableBlob, stableFilename)
     
     return api.post('/pages/upload-image', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      onUploadProgress: (e) => {
-        if (onProgress && e.total) {
-          onProgress(e.loaded / e.total)
-        }
+      onUploadProgress: (ev) => {
+        if (onProgress && ev.total) onProgress(ev.loaded / ev.total)
       }
     })
   },
@@ -224,12 +321,18 @@ export const configApi = {
 export const mcpApi = {
   list: () => api.get('/mcp'),
   toggle: (presetKey, enable) => api.post(`/mcp/${presetKey}/toggle`, null, { params: { enable } }),
-  upload: (file) => {
-    const formData = new FormData()
-    formData.append('file', file)
-    return api.post('/mcp/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
-    })
+  upload: async (file) => {
+    // 同样采用“直传优先，失败再稳定化读取”
+    try {
+      const directForm = new FormData()
+      directForm.append('file', file)
+      return await api.post('/mcp/upload', directForm)
+    } catch (e) {
+      const formData = new FormData()
+      const { blob, filename } = await toStableUploadPayload(file)
+      formData.append('file', blob, filename)
+      return api.post('/mcp/upload', formData)
+    }
   },
   addConfig: (config) => api.post('/mcp/config', config),
   update: (serverId, config) => api.put(`/mcp/${serverId}`, config),

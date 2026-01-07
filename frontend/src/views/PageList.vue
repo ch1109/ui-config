@@ -29,16 +29,89 @@
     <div class="page-content">
       <!-- Filter Bar -->
       <div class="filter-bar">
-        <div class="filter-tabs">
-          <button 
-            v-for="tab in statusTabs" 
-            :key="tab.value"
-            :class="['filter-tab', { active: currentStatus === tab.value }]"
-            @click="currentStatus = tab.value"
-          >
-            {{ tab.label }}
-            <span class="tab-count">{{ getStatusCount(tab.value) }}</span>
-          </button>
+        <div class="filter-left">
+          <!-- 项目筛选 -->
+          <div class="project-filter">
+            <a-dropdown :trigger="['click']" placement="bottomLeft">
+              <button class="project-select-btn" :style="selectedProject ? { borderColor: selectedProject.color } : {}">
+                <span v-if="selectedProject" class="project-dot" :style="{ background: selectedProject.color }"></span>
+                <span class="project-name">{{ selectedProject ? selectedProject.name : '全部项目' }}</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="arrow-icon">
+                  <path d="M6 9l6 6 6-6"/>
+                </svg>
+              </button>
+              <template #overlay>
+                <div class="project-dropdown">
+                  <div class="dropdown-header">
+                    <span>选择项目</span>
+                    <button class="add-project-btn" @click="openProjectModal()">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 4v16m-8-8h16"/>
+                      </svg>
+                      新建
+                    </button>
+                  </div>
+                  <div class="dropdown-list">
+                    <div 
+                      class="dropdown-item"
+                      :class="{ active: !currentProjectId }"
+                      @click="selectProject(null)"
+                    >
+                      <span class="project-dot all"></span>
+                      <span>全部项目</span>
+                      <span class="item-count">{{ pages.length }}</span>
+                    </div>
+                    <div 
+                      class="dropdown-item"
+                      :class="{ active: currentProjectId === 0 }"
+                      @click="selectProject({ id: 0, name: '未分配', color: '#9ca3af' })"
+                    >
+                      <span class="project-dot" style="background: #9ca3af"></span>
+                      <span>未分配</span>
+                      <span class="item-count">{{ getProjectPageCount(0) }}</span>
+                    </div>
+                    <div 
+                      v-for="project in projects" 
+                      :key="project.id"
+                      class="dropdown-item"
+                      :class="{ active: currentProjectId === project.id }"
+                      @click="selectProject(project)"
+                    >
+                      <span class="project-dot" :style="{ background: project.color }"></span>
+                      <span>{{ project.name }}</span>
+                      <span class="item-count">{{ project.page_count }}</span>
+                      <div class="item-actions" @click.stop>
+                        <button class="item-action-btn" @click="openProjectModal(project)" title="编辑">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+                            <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                          </svg>
+                        </button>
+                        <button class="item-action-btn delete" @click="deleteProject(project)" title="删除">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </a-dropdown>
+          </div>
+          
+          <!-- 状态筛选 -->
+          <div class="filter-tabs">
+            <button 
+              v-for="tab in statusTabs" 
+              :key="tab.value"
+              :class="['filter-tab', { active: currentStatus === tab.value }]"
+              @click="currentStatus = tab.value"
+            >
+              {{ tab.label }}
+              <span class="tab-count">{{ getStatusCount(tab.value) }}</span>
+            </button>
+          </div>
         </div>
         
         <div class="search-wrapper">
@@ -77,7 +150,7 @@
           </svg>
         </div>
         <h3>暂无页面配置</h3>
-        <p>创建您的第一个页面配置，开始使用 AI 辅助解析功能</p>
+        <p>{{ selectedProject ? `项目「${selectedProject.name}」下还没有页面` : '创建您的第一个页面配置，开始使用 AI 辅助解析功能' }}</p>
         <a-button type="primary" size="large" @click="goToCreate">
           <template #icon>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="btn-icon">
@@ -122,6 +195,14 @@
             <p class="card-id">{{ page.page_id }}</p>
             
             <div class="card-footer">
+              <span 
+                v-if="page.project_name" 
+                class="project-tag"
+                :style="{ background: getProjectColor(page.project_id) + '20', color: getProjectColor(page.project_id) }"
+              >
+                <span class="tag-dot" :style="{ background: getProjectColor(page.project_id) }"></span>
+                {{ page.project_name }}
+              </span>
               <span class="update-time" v-if="page.updated_at">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <circle cx="12" cy="12" r="10"/>
@@ -148,6 +229,54 @@
         </article>
       </div>
     </div>
+    
+    <!-- 项目编辑弹窗 -->
+    <a-modal
+      v-model:open="projectModalVisible"
+      :title="editingProject ? '编辑项目' : '新建项目'"
+      :width="480"
+      :footer="null"
+      :destroyOnClose="true"
+      class="project-modal"
+    >
+      <div class="project-form">
+        <div class="form-group">
+          <label>项目名称 <span class="required">*</span></label>
+          <a-input 
+            v-model:value="projectForm.name" 
+            placeholder="请输入项目名称"
+            :maxlength="100"
+          />
+        </div>
+        <div class="form-group">
+          <label>项目描述</label>
+          <a-textarea 
+            v-model:value="projectForm.description" 
+            placeholder="请输入项目描述（可选）"
+            :rows="3"
+            :maxlength="500"
+          />
+        </div>
+        <div class="form-group">
+          <label>项目颜色</label>
+          <div class="color-picker">
+            <button 
+              v-for="color in projectColors" 
+              :key="color"
+              :class="['color-option', { active: projectForm.color === color }]"
+              :style="{ background: color }"
+              @click="projectForm.color = color"
+            ></button>
+          </div>
+        </div>
+        <div class="form-actions">
+          <a-button @click="projectModalVisible = false">取消</a-button>
+          <a-button type="primary" :loading="projectSaving" @click="saveProject">
+            {{ editingProject ? '保存' : '创建' }}
+          </a-button>
+        </div>
+      </div>
+    </a-modal>
   </div>
 </template>
 
@@ -156,15 +285,35 @@ import { ref, computed, onMounted, createVNode } from 'vue'
 import { useRouter } from 'vue-router'
 import { Modal, message } from 'ant-design-vue'
 import { ExclamationCircleOutlined } from '@ant-design/icons-vue'
-import { pageConfigApi } from '@/api'
+import { pageConfigApi, projectApi } from '@/api'
 
 const router = useRouter()
 
 // 状态
 const pages = ref([])
+const projects = ref([])
 const isLoading = ref(true)
 const currentStatus = ref('')
+const currentProjectId = ref(null)
+const selectedProject = ref(null)
 const searchQuery = ref('')
+
+// 项目弹窗
+const projectModalVisible = ref(false)
+const editingProject = ref(null)
+const projectSaving = ref(false)
+const projectForm = ref({
+  name: '',
+  description: '',
+  color: '#6366f1'
+})
+
+// 项目颜色选项
+const projectColors = [
+  '#6366f1', '#8b5cf6', '#ec4899', '#ef4444', 
+  '#f97316', '#eab308', '#22c55e', '#14b8a6', 
+  '#06b6d4', '#3b82f6', '#64748b', '#1e293b'
+]
 
 // 状态标签
 const statusTabs = [
@@ -178,10 +327,21 @@ const statusTabs = [
 const filteredPages = computed(() => {
   let result = pages.value
   
+  // 按项目筛选
+  if (currentProjectId.value !== null) {
+    if (currentProjectId.value === 0) {
+      result = result.filter(p => !p.project_id)
+    } else {
+      result = result.filter(p => p.project_id === currentProjectId.value)
+    }
+  }
+  
+  // 按状态筛选
   if (currentStatus.value) {
     result = result.filter(p => p.status === currentStatus.value)
   }
   
+  // 搜索
   if (searchQuery.value) {
     const query = searchQuery.value.toLowerCase()
     result = result.filter(p => 
@@ -196,11 +356,15 @@ const filteredPages = computed(() => {
 // 加载数据
 onMounted(async () => {
   try {
-    const response = await pageConfigApi.list()
-    pages.value = response
+    const [pagesRes, projectsRes] = await Promise.all([
+      pageConfigApi.list(),
+      projectApi.list()
+    ])
+    pages.value = pagesRes
+    projects.value = projectsRes
   } catch (error) {
-    console.error('Failed to load pages:', error)
-    message.error('加载页面列表失败')
+    console.error('Failed to load data:', error)
+    message.error('加载数据失败')
   } finally {
     isLoading.value = false
   }
@@ -208,8 +372,127 @@ onMounted(async () => {
 
 // 获取状态数量
 const getStatusCount = (status) => {
-  if (!status) return pages.value.length
-  return pages.value.filter(p => p.status === status).length
+  let filtered = pages.value
+  
+  // 先按项目筛选
+  if (currentProjectId.value !== null) {
+    if (currentProjectId.value === 0) {
+      filtered = filtered.filter(p => !p.project_id)
+    } else {
+      filtered = filtered.filter(p => p.project_id === currentProjectId.value)
+    }
+  }
+  
+  if (!status) return filtered.length
+  return filtered.filter(p => p.status === status).length
+}
+
+// 获取项目下的页面数量
+const getProjectPageCount = (projectId) => {
+  if (projectId === 0) {
+    return pages.value.filter(p => !p.project_id).length
+  }
+  return pages.value.filter(p => p.project_id === projectId).length
+}
+
+// 获取项目颜色
+const getProjectColor = (projectId) => {
+  const project = projects.value.find(p => p.id === projectId)
+  return project?.color || '#6366f1'
+}
+
+// 选择项目
+const selectProject = (project) => {
+  if (project) {
+    currentProjectId.value = project.id
+    selectedProject.value = project
+  } else {
+    currentProjectId.value = null
+    selectedProject.value = null
+  }
+}
+
+// 打开项目弹窗
+const openProjectModal = (project = null) => {
+  editingProject.value = project
+  if (project) {
+    projectForm.value = {
+      name: project.name,
+      description: project.description || '',
+      color: project.color || '#6366f1'
+    }
+  } else {
+    projectForm.value = {
+      name: '',
+      description: '',
+      color: '#6366f1'
+    }
+  }
+  projectModalVisible.value = true
+}
+
+// 保存项目
+const saveProject = async () => {
+  if (!projectForm.value.name.trim()) {
+    message.warning('请输入项目名称')
+    return
+  }
+  
+  projectSaving.value = true
+  try {
+    if (editingProject.value) {
+      // 更新
+      const updated = await projectApi.update(editingProject.value.id, projectForm.value)
+      const index = projects.value.findIndex(p => p.id === editingProject.value.id)
+      if (index > -1) {
+        projects.value[index] = { ...projects.value[index], ...updated }
+      }
+      // 更新选中状态
+      if (selectedProject.value?.id === editingProject.value.id) {
+        selectedProject.value = { ...selectedProject.value, ...updated }
+      }
+      message.success('项目更新成功')
+    } else {
+      // 创建
+      const created = await projectApi.create(projectForm.value)
+      projects.value.unshift(created)
+      message.success('项目创建成功')
+    }
+    projectModalVisible.value = false
+  } catch (error) {
+    message.error(error.response?.data?.detail || '操作失败')
+  } finally {
+    projectSaving.value = false
+  }
+}
+
+// 删除项目
+const deleteProject = (project) => {
+  Modal.confirm({
+    title: '删除项目',
+    icon: createVNode(ExclamationCircleOutlined),
+    content: `确定要删除项目「${project.name}」吗？项目下的页面不会被删除，但会取消关联。`,
+    okText: '删除',
+    okType: 'danger',
+    cancelText: '取消',
+    async onOk() {
+      try {
+        await projectApi.delete(project.id)
+        projects.value = projects.value.filter(p => p.id !== project.id)
+        // 如果删除的是当前选中的项目，清除选中
+        if (currentProjectId.value === project.id) {
+          currentProjectId.value = null
+          selectedProject.value = null
+        }
+        // 刷新页面列表
+        const pagesRes = await pageConfigApi.list()
+        pages.value = pagesRes
+        message.success('项目已删除')
+      } catch (error) {
+        message.error('删除失败，请重试')
+      }
+    },
+  });
 }
 
 // 状态样式
@@ -245,7 +528,12 @@ const formatTime = (time) => {
 
 // 创建页面
 const goToCreate = () => {
-  router.push('/page/new')
+  // 如果选中了项目，带上项目ID
+  if (currentProjectId.value && currentProjectId.value !== 0) {
+    router.push(`/page/new?project=${currentProjectId.value}`)
+  } else {
+    router.push('/page/new')
+  }
 }
 
 // 编辑页面
@@ -349,6 +637,203 @@ const handleDelete = (page) => {
   align-items: center;
   margin-bottom: 32px;
   gap: 24px;
+}
+
+.filter-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+// 项目筛选
+.project-filter {
+  position: relative;
+}
+
+.project-select-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+  min-width: 160px;
+  
+  &:hover {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px var(--primary-light);
+  }
+  
+  .project-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  
+  .project-name {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+    flex: 1;
+    text-align: left;
+  }
+  
+  .arrow-icon {
+    width: 16px;
+    height: 16px;
+    color: var(--text-muted);
+  }
+}
+
+.project-dropdown {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+  min-width: 260px;
+  overflow: hidden;
+}
+
+.dropdown-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-light);
+  
+  span {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+  
+  .add-project-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--primary);
+    background: var(--primary-light);
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+    
+    svg {
+      width: 12px;
+      height: 12px;
+    }
+    
+    &:hover {
+      background: var(--primary);
+      color: white;
+    }
+  }
+}
+
+.dropdown-list {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+  
+  .project-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    
+    &.all {
+      background: linear-gradient(135deg, #6366f1, #8b5cf6, #ec4899);
+    }
+  }
+  
+  span:nth-child(2) {
+    flex: 1;
+    font-size: 14px;
+    color: var(--text-primary);
+  }
+  
+  .item-count {
+    font-size: 12px;
+    color: var(--text-muted);
+    background: var(--bg-subtle);
+    padding: 2px 8px;
+    border-radius: 10px;
+  }
+  
+  .item-actions {
+    display: none;
+    gap: 4px;
+    margin-left: 8px;
+  }
+  
+  .item-action-btn {
+    width: 26px;
+    height: 26px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.15s;
+    
+    svg {
+      width: 14px;
+      height: 14px;
+      color: var(--text-muted);
+    }
+    
+    &:hover {
+      background: var(--bg-subtle);
+      
+      svg {
+        color: var(--primary);
+      }
+    }
+    
+    &.delete:hover svg {
+      color: var(--error);
+    }
+  }
+  
+  &:hover {
+    background: var(--bg-subtle);
+    
+    .item-actions {
+      display: flex;
+    }
+    
+    .item-count {
+      display: none;
+    }
+  }
+  
+  &.active {
+    background: var(--primary-light);
+    
+    span:nth-child(2) {
+      color: var(--primary);
+      font-weight: 500;
+    }
+  }
 }
 
 .filter-tabs {
@@ -614,6 +1099,24 @@ const handleDelete = (page) => {
 .card-footer {
   display: flex;
   align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  
+  .project-tag {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 500;
+    border-radius: 6px;
+    
+    .tag-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+  }
   
   .update-time {
     display: flex;
@@ -621,6 +1124,7 @@ const handleDelete = (page) => {
     gap: 6px;
     font-size: 12px;
     color: var(--text-muted);
+    margin-left: auto;
     
     svg {
       width: 14px;
@@ -675,6 +1179,58 @@ const handleDelete = (page) => {
         color: white;
       }
     }
+  }
+}
+
+// 项目弹窗
+.project-form {
+  .form-group {
+    margin-bottom: 20px;
+    
+    label {
+      display: block;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-primary);
+      margin-bottom: 8px;
+      
+      .required {
+        color: var(--error);
+      }
+    }
+  }
+  
+  .color-picker {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    
+    .color-option {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      border: 2px solid transparent;
+      cursor: pointer;
+      transition: all 0.2s;
+      
+      &:hover {
+        transform: scale(1.1);
+      }
+      
+      &.active {
+        border-color: var(--text-heading);
+        box-shadow: 0 0 0 2px white, 0 0 0 4px currentColor;
+      }
+    }
+  }
+  
+  .form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 28px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border-light);
   }
 }
 </style>

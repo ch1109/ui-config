@@ -5,3 +5,4 @@
 backend/ui_config.db
 backend/uploads/
 frontend/node_modules/
+backend/venv/

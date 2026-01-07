@@ -14,14 +14,21 @@
     <template v-if="modelValue">
       <img :src="modelValue" alt="页面截图" class="preview-image" />
       <div class="overlay">
-        <button class="btn-action" type="button" @click.stop.prevent="openFilePicker">
+        <label class="btn-action">
+          <input 
+            type="file" 
+            accept="image/png,image/jpeg,.png,.jpg,.jpeg"
+            :disabled="disabled || isUploading"
+            @change="handleFileSelect"
+            class="hidden-input"
+          />
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M1 4v6h6M23 20v-6h-6"/>
             <path d="M20.49 9A9 9 0 005.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 013.51 15"/>
           </svg>
           更换
-        </button>
-        <button class="btn-action danger" type="button" @click.stop.prevent="handleRemove">
+        </label>
+        <button class="btn-action danger" type="button" @click.stop="handleRemove">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
           </svg>
@@ -50,9 +57,16 @@
       </div>
     </template>
     
-    <!-- Default: Click to upload -->
+    <!-- Default: Click to upload (input nested inside label for reliability) -->
     <template v-else>
-      <div class="upload-placeholder" @click.stop="openFilePicker">
+      <label class="upload-placeholder">
+        <input 
+          type="file" 
+          accept="image/png,image/jpeg,.png,.jpg,.jpeg"
+          :disabled="disabled || isUploading"
+          @change="handleFileSelect"
+          class="hidden-input"
+        />
         <div class="upload-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
@@ -61,16 +75,8 @@
         <p class="upload-text">拖拽图片到此处</p>
         <p class="upload-hint">或点击上传</p>
         <p class="upload-formats">支持 PNG, JPG (最大 10MB)</p>
-      </div>
+      </label>
     </template>
-    
-    <input
-      ref="fileInputRef"
-      type="file"
-      accept="image/png,image/jpeg,.png,.jpg,.jpeg"
-      class="file-input"
-      @change="handleFileSelect"
-    />
   </div>
 </template>
 
@@ -85,30 +91,9 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue', 'upload-success', 'upload-error'])
 
-const fileInputRef = ref(null)
 const isDragover = ref(false)
 const isUploading = ref(false)
 const uploadProgress = ref(0)
-const isPickerOpen = ref(false)
-
-// 打开文件选择器
-const openFilePicker = () => {
-  if (props.disabled || isUploading.value || isPickerOpen.value) {
-    return
-  }
-  
-  isPickerOpen.value = true
-  
-  // 确保 input 存在并触发点击
-  if (fileInputRef.value) {
-    fileInputRef.value.click()
-  }
-  
-  // 重置标志，允许下次打开
-  setTimeout(() => {
-    isPickerOpen.value = false
-  }, 500)
-}
 
 const handleDragover = () => {
   if (!props.disabled) isDragover.value = true
@@ -128,14 +113,18 @@ const handleDrop = (e) => {
   }
 }
 
-const handleFileSelect = (e) => {
-  const files = e.target.files
-  if (files && files.length > 0) {
-    processFile(files[0])
-  }
-  // 重置 input 以允许选择相同文件
-  if (fileInputRef.value) {
-    fileInputRef.value.value = ''
+const handleFileSelect = async (e) => {
+  const inputEl = e.target
+  const files = inputEl.files
+  try {
+    if (files && files.length > 0) {
+      // 注意：processFile 是异步的；不要在其完成前就清空 input.value，
+      // 否则部分浏览器会撤销文件读取权限，导致 NotReadableError。
+      await processFile(files[0])
+    }
+  } finally {
+    // 重置 input 以允许选择相同文件
+    inputEl.value = ''
   }
 }
 
@@ -172,9 +161,27 @@ const processFile = async (file) => {
     emit('upload-success', result)
   } catch (error) {
     console.error('Upload error:', error)
+    
+    // 构建友好的错误信息
+    let errorMessage = '上传失败，请重试'
+    let errorCode = 'UPLOAD_FAILED'
+    
+    if (error.code === 'UPLOAD_FAILED' || error.name === 'NotReadableError') {
+      errorMessage = error.message
+      errorCode = 'FILE_READ_ERROR'
+    } else if (error.message?.includes('Network Error') || error.code === 'ERR_NETWORK') {
+      errorMessage = '网络连接失败，请检查后端服务是否正常运行'
+      errorCode = 'NETWORK_ERROR'
+    } else if (error.response?.data?.message) {
+      errorMessage = error.response.data.message
+      errorCode = error.response.data.error || 'SERVER_ERROR'
+    } else if (error.message) {
+      errorMessage = error.message
+    }
+    
     emit('upload-error', {
-      code: error.response?.data?.error || 'UPLOAD_FAILED',
-      message: error.response?.data?.message || '上传失败'
+      code: errorCode,
+      message: errorMessage
     })
   } finally {
     isUploading.value = false
@@ -195,22 +202,23 @@ const handleRemove = () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: default;
   transition: all 0.3s;
   position: relative;
   overflow: hidden;
   background: var(--bg-subtle);
   
-  &:hover:not(.is-disabled) {
+  &:hover:not(.is-disabled):not(.has-image) {
     border-color: var(--primary);
     background: var(--primary-light);
     
-    .overlay {
-      opacity: 1;
-    }
-    
     .upload-icon {
       transform: translateY(-4px);
+    }
+  }
+  
+  &:hover:not(.is-disabled).has-image {
+    .overlay {
+      opacity: 1;
     }
   }
   
@@ -233,6 +241,10 @@ const handleRemove = () => {
   &.is-disabled {
     opacity: 0.6;
     cursor: not-allowed;
+    
+    .upload-placeholder {
+      cursor: not-allowed;
+    }
   }
 }
 
@@ -291,13 +303,13 @@ const handleRemove = () => {
 .upload-placeholder {
   text-align: center;
   padding: 32px;
-  cursor: pointer;
   width: 100%;
   height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  cursor: pointer;
   
   .upload-icon {
     width: 64px;
@@ -337,8 +349,16 @@ const handleRemove = () => {
   }
 }
 
-.file-input {
-  display: none;
+.hidden-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .upload-progress {

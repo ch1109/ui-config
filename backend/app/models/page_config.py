@@ -4,8 +4,9 @@
 对应任务: T2.1.1, T2.1.3
 """
 
-from sqlalchemy import Column, Integer, String, Text, JSON, DateTime, Enum
+from sqlalchemy import Column, Integer, String, Text, JSON, DateTime, Enum, ForeignKey
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 from app.database import Base
 import enum
 
@@ -23,6 +24,13 @@ class PageConfig(Base):
     __tablename__ = "page_configs"
     
     id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(
+        Integer, 
+        ForeignKey("projects.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="所属项目 ID"
+    )
     page_id = Column(
         String(100), 
         unique=True, 
@@ -80,6 +88,9 @@ class PageConfig(Base):
         onupdate=func.now(),
         comment="更新时间"
     )
+    
+    # 关联项目
+    project = relationship("Project", back_populates="pages")
     
     def __repr__(self):
         return f"<PageConfig(id={self.id}, page_id={self.page_id})>"
