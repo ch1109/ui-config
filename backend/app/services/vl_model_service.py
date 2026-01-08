@@ -9,6 +9,8 @@ import httpx
 import base64
 import json
 import aiofiles
+import ssl
+import os
 from typing import Optional, Dict, Any, List, AsyncGenerator
 from urllib.parse import urlparse
 from app.schemas.vl_response import VLParseResult, ParsedElement
@@ -17,6 +19,13 @@ from app.core.exceptions import SSRFProtectionError, InvalidFileTypeError
 import logging
 
 logger = logging.getLogger(__name__)
+
+# 解决 macOS 上 Python LibreSSL 的 SSL 证书问题
+# 使用系统 SSL 证书文件
+SSL_CERT_FILE = "/etc/ssl/cert.pem"
+if os.path.exists(SSL_CERT_FILE):
+    os.environ.setdefault('SSL_CERT_FILE', SSL_CERT_FILE)
+    os.environ.setdefault('REQUESTS_CA_BUNDLE', SSL_CERT_FILE)
 
 # Qwen2.5-VL-7B 本地部署配置
 QWEN_LOCAL_ENDPOINT = "http://192.168.3.183:9000/vision/chat"
@@ -115,7 +124,7 @@ class VLModelService:
         
         logger.debug(f"Request body keys: {list(request_body.keys())}, model: {request_body.get('model')}")
         
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, verify=SSL_CERT_FILE) as client:
             headers = {
                 "Content-Type": "application/json"
             }
@@ -185,7 +194,7 @@ class VLModelService:
         logger.info(f"Image size: {len(image_bytes)} bytes, content_type: {content_type}")
         logger.debug(f"Messages data: {json.dumps(messages_data, ensure_ascii=False)[:200]}...")
         
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, verify=SSL_CERT_FILE) as client:
             # 使用 multipart/form-data 格式
             files = {
                 "image_file": (filename, image_bytes, content_type)
@@ -284,7 +293,7 @@ class VLModelService:
             if not self._is_safe_url(image_url):
                 raise SSRFProtectionError()
             
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=30.0, verify=SSL_CERT_FILE) as client:
                 resp = await client.get(image_url, follow_redirects=True)
                 content_type = resp.headers.get("Content-Type", "")
                 
@@ -384,7 +393,7 @@ class VLModelService:
             
             accumulated_content = ""
             
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with httpx.AsyncClient(timeout=self.timeout, verify=SSL_CERT_FILE) as client:
                 headers = {
                     "Content-Type": "application/json"
                 }
@@ -572,7 +581,7 @@ class VLModelService:
             if not self._is_safe_url(image_url):
                 raise SSRFProtectionError()
             
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=30.0, verify=SSL_CERT_FILE) as client:
                 resp = await client.get(image_url, follow_redirects=True)
                 content_type = resp.headers.get("Content-Type", "")
                 
@@ -696,7 +705,7 @@ class VLModelService:
                 }
             ]
             
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with httpx.AsyncClient(timeout=self.timeout, verify=SSL_CERT_FILE) as client:
                 headers = {"Content-Type": "application/json"}
                 if self.api_key:
                     headers["Authorization"] = f"Bearer {self.api_key}"
@@ -831,7 +840,7 @@ class VLModelService:
             "content": f"用户回答: {user_response}\n\n请基于这个信息更新配置，并判断是否还需要继续澄清。只输出 JSON。"
         })
         
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, verify=SSL_CERT_FILE) as client:
             headers = {"Content-Type": "application/json"}
             if self.api_key:
                 headers["Authorization"] = f"Bearer {self.api_key}"
@@ -906,7 +915,7 @@ class VLModelService:
             
             accumulated_content = ""
             
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with httpx.AsyncClient(timeout=self.timeout, verify=SSL_CERT_FILE) as client:
                 headers = {"Content-Type": "application/json"}
                 if self.api_key:
                     headers["Authorization"] = f"Bearer {self.api_key}"

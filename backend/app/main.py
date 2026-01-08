@@ -23,7 +23,7 @@ from app.core.exceptions import (
 from app.database import init_db, close_db
 
 # 导入路由
-from app.api.v1 import system_prompt, project, page_config, clarify, config_generator, mcp
+from app.api.v1 import system_prompt, project, page_config, clarify, config_generator, mcp, mcp_test, mcp_context
 
 # 配置日志
 logging.basicConfig(
@@ -89,6 +89,8 @@ app.include_router(page_config.router)
 app.include_router(clarify.router)
 app.include_router(config_generator.router)
 app.include_router(mcp.router)
+app.include_router(mcp_test.router)
+app.include_router(mcp_context.router)
 
 
 @app.get("/")

@@ -31,6 +31,9 @@ const routes = [
     component: () => import('@/views/MCPManager.vue'),
     meta: { title: 'MCP 服务器管理' }
   }
+  // 已合并到 MCPManager.vue:
+  // - /mcp-test (MCP 功能测试)
+  // - /mcp-real (真实 MCP 测试)
 ]
 
 const router = createRouter({

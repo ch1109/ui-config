@@ -20,14 +20,27 @@ from app.core.exceptions import InvalidJsonError
 router = APIRouter(prefix="/api/v1/mcp", tags=["MCP Server"])
 
 
-# REQ-M6-001: 预制 Context7 配置
+# REQ-M6-001: 预制 MCP 服务器配置
 PRESET_MCP_SERVERS = {
     "context7": {
         "name": "Context7",
-        "description": "通用上下文管理 MCP 服务器，用于获取页面相关的业务文档",
-        "server_url": "https://mcp.context7.io",
-        "tools": ["search", "retrieve", "store"],
-        "is_preset": True
+        "description": "官方文档搜索 MCP 服务器，提供 resolve-library-id 和 get-library-docs 工具，用于获取最新的库文档",
+        "transport": "stdio",
+        "command": "npx",
+        "args": ["-y", "@upstash/context7-mcp@latest"],
+        "tools": ["resolve-library-id", "get-library-docs"],
+        "is_preset": True,
+        "requires_node": True
+    },
+    "everything": {
+        "name": "Everything Server",
+        "description": "MCP 官方测试服务器，包含完整的 tools、resources、prompts 示例，非常适合验证 MCP 功能",
+        "transport": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-everything@latest"],
+        "tools": ["echo", "add", "longRunningOperation", "sampleLLM", "getTinyImage", "printEnv", "annotatedMessage"],
+        "is_preset": True,
+        "requires_node": True
     }
 }
 
@@ -47,8 +60,11 @@ class MCPServerResponse(BaseModel):
     """MCP 服务器响应"""
     id: int
     name: str
-    server_url: str
-    status: str  # enabled, disabled, error
+    server_url: Optional[str] = None  # HTTP 服务器 URL
+    transport: str = "http"  # stdio 或 http
+    command: Optional[str] = None  # stdio 命令
+    args: Optional[List[str]] = None  # stdio 参数
+    status: str  # enabled, disabled, error, running
     tools: List[str]
     is_preset: bool
     description: Optional[str] = None
@@ -69,14 +85,20 @@ async def list_mcp_servers(db: AsyncSession = Depends(get_db)):
     response_list = []
     
     # 添加预制服务器
+    preset_id_counter = -1  # 使用负数 ID 区分预置服务器
     for key, preset in PRESET_MCP_SERVERS.items():
         # 检查是否已有用户配置
         existing = next((s for s in servers if s.preset_key == key), None)
+        transport = preset.get("transport", "http")
+        
         if existing:
             response_list.append(MCPServerResponse(
                 id=existing.id,
                 name=preset["name"],
-                server_url=preset["server_url"],
+                server_url=preset.get("server_url"),
+                transport=transport,
+                command=preset.get("command") if transport == "stdio" else None,
+                args=preset.get("args") if transport == "stdio" else None,
                 status=existing.status,
                 tools=preset["tools"],
                 is_preset=True,
@@ -85,15 +107,19 @@ async def list_mcp_servers(db: AsyncSession = Depends(get_db)):
             ))
         else:
             response_list.append(MCPServerResponse(
-                id=0,
+                id=preset_id_counter,
                 name=preset["name"],
-                server_url=preset["server_url"],
+                server_url=preset.get("server_url"),
+                transport=transport,
+                command=preset.get("command") if transport == "stdio" else None,
+                args=preset.get("args") if transport == "stdio" else None,
                 status="disabled",
                 tools=preset["tools"],
                 is_preset=True,
                 description=preset.get("description"),
                 last_check=None
             ))
+        preset_id_counter -= 1
     
     # 添加自定义服务器
     for server in servers:
@@ -102,6 +128,7 @@ async def list_mcp_servers(db: AsyncSession = Depends(get_db)):
                 id=server.id,
                 name=server.name,
                 server_url=server.server_url,
+                transport="http",  # 自定义服务器目前只支持 HTTP
                 status=server.status,
                 tools=server.tools or [],
                 is_preset=False,
@@ -137,7 +164,7 @@ async def toggle_preset_server(
         existing = MCPServer(
             preset_key=preset_key,
             name=preset["name"],
-            server_url=preset["server_url"],
+            server_url=preset.get("server_url", ""),  # stdio 服务器可能没有 URL
             tools=preset["tools"],
             description=preset.get("description"),
             status="enabled" if enable else "disabled"

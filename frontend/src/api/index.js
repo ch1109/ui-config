@@ -83,7 +83,10 @@ export const systemPromptApi = {
   // 获取可用模型列表
   getModels: () => api.get('/system-prompt/models'),
   // 更新选择的模型
-  updateModel: (model) => api.put('/system-prompt', { selected_model: model })
+  updateModel: (model) => api.put('/system-prompt', { selected_model: model }),
+  // 获取带有 MCP 工具信息的完整系统提示词
+  getWithMcpTools: (includeUnavailable = false) => 
+    api.get('/system-prompt/with-mcp-tools', { params: { include_unavailable: includeUnavailable } })
 }
 
 // Project API
@@ -326,7 +329,7 @@ export const mcpApi = {
   list: () => api.get('/mcp'),
   toggle: (presetKey, enable) => api.post(`/mcp/${presetKey}/toggle`, null, { params: { enable } }),
   upload: async (file) => {
-    // 同样采用“直传优先，失败再稳定化读取”
+    // 同样采用"直传优先，失败再稳定化读取"
     try {
       const directForm = new FormData()
       directForm.append('file', file)
@@ -342,6 +345,132 @@ export const mcpApi = {
   update: (serverId, config) => api.put(`/mcp/${serverId}`, config),
   delete: (serverId) => api.delete(`/mcp/${serverId}`),
   test: (serverId) => api.post(`/mcp/${serverId}/test`)
+}
+
+// MCP Context API - 获取 MCP 工具上下文信息
+export const mcpContextApi = {
+  // 获取完整的 MCP 上下文（包含系统提示词片段、工具列表等）
+  getContext: () => api.get('/mcp-context'),
+  
+  // 获取系统提示词片段
+  getSystemPromptSnippet: (includeUnavailable = false) => 
+    api.get('/mcp-context/system-prompt', { params: { include_unavailable: includeUnavailable } }),
+  
+  // 获取可用工具列表
+  getTools: (format = 'list') => api.get('/mcp-context/tools', { params: { format } }),
+  
+  // 获取已启用的服务器列表
+  getServers: () => api.get('/mcp-context/servers')
+}
+
+// MCP Test API - 用于测试 MCP 功能
+export const mcpTestApi = {
+  // 演示服务器 API
+  getDemoTools: () => api.get('/mcp-test/demo/tools'),
+  callDemoTool: (toolName, args) => api.post('/mcp-test/demo/tools/call', { tool_name: toolName, arguments: args }),
+  getDemoResources: () => api.get('/mcp-test/demo/resources'),
+  readDemoResource: (uri) => api.post('/mcp-test/demo/resources/read', { uri }),
+  getDemoPrompts: () => api.get('/mcp-test/demo/prompts'),
+  getDemoPrompt: (name, args) => api.post('/mcp-test/demo/prompts/get', { name, arguments: args }),
+  batchTest: () => api.post('/mcp-test/demo/batch-test'),
+  
+  // 流式测试 (使用 fetch 处理 SSE)
+  streamTest: (onMessage, onComplete, onError) => {
+    const controller = new AbortController()
+    
+    fetch('/api/v1/mcp-test/demo/stream-test', {
+      method: 'GET',
+      headers: { 'Accept': 'text/event-stream' },
+      signal: controller.signal
+    }).then(async response => {
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+      
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const dataStr = line.substring(6).trim()
+            if (!dataStr) continue
+            
+            try {
+              const data = JSON.parse(dataStr)
+              if (data.type === 'complete') {
+                onComplete && onComplete(data)
+              } else {
+                onMessage && onMessage(data)
+              }
+            } catch (e) {
+              console.debug('Parse error:', dataStr)
+            }
+          }
+        }
+      }
+    }).catch(error => {
+      if (error.name !== 'AbortError') {
+        console.error('Stream error:', error)
+        onError && onError('连接失败，请重试')
+      }
+    })
+    
+    return { close: () => controller.abort() }
+  },
+  
+  // 外部服务器 API (HTTP)
+  getServerTools: (serverId) => api.get(`/mcp-test/servers/${serverId}/tools`),
+  callServerTool: (serverId, toolName, args) => api.post(`/mcp-test/servers/${serverId}/tools/call`, { tool_name: toolName, arguments: args }),
+  
+  // ========== 真实 MCP 服务器 API (stdio) ==========
+  
+  // 获取所有 stdio 服务器状态
+  getStdioStatus: () => api.get('/mcp-test/stdio/status'),
+  
+  // 启动 stdio 服务器 (context7, everything)
+  startStdioServer: (serverKey) => api.post('/mcp-test/stdio/start', { server_key: serverKey }),
+  
+  // 停止 stdio 服务器
+  stopStdioServer: (serverKey) => api.post('/mcp-test/stdio/stop', { server_key: serverKey }),
+  
+  // 获取 stdio 服务器的工具列表
+  getStdioTools: (serverKey) => api.get(`/mcp-test/stdio/${serverKey}/tools`),
+  
+  // 调用 stdio 服务器的工具
+  callStdioTool: (serverKey, toolName, args) => api.post('/mcp-test/stdio/tools/call', { 
+    server_key: serverKey, 
+    tool_name: toolName, 
+    arguments: args 
+  }),
+  
+  // 获取 stdio 服务器的资源列表
+  getStdioResources: (serverKey) => api.get(`/mcp-test/stdio/${serverKey}/resources`),
+  
+  // 读取 stdio 服务器的资源
+  readStdioResource: (serverKey, uri) => api.post('/mcp-test/stdio/resources/read', {
+    server_key: serverKey,
+    uri: uri
+  }),
+  
+  // 获取 stdio 服务器的提示模板列表
+  getStdioPrompts: (serverKey) => api.get(`/mcp-test/stdio/${serverKey}/prompts`),
+  
+  // 获取 stdio 服务器的提示模板内容
+  getStdioPrompt: (serverKey, name, args) => api.post('/mcp-test/stdio/prompts/get', {
+    server_key: serverKey,
+    name: name,
+    arguments: args
+  }),
+  
+  // 批量测试 stdio 服务器
+  batchTestStdio: (serverKey) => api.post(`/mcp-test/stdio/${serverKey}/batch-test`)
 }
 
 export default api

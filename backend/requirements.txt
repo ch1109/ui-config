@@ -24,6 +24,9 @@ jsonschema==4.21.1
 # Image Processing (optional, for validation)
 Pillow==10.2.0
 
+# MCP (Model Context Protocol) - 内置演示服务器，无需外部依赖
+# 如需使用官方 MCP SDK，请安装: pip install mcp
+
 # Testing
 pytest>=7.0.0,<8.0.0
 pytest-asyncio==0.23.4

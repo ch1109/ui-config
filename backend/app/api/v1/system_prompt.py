@@ -2,6 +2,10 @@
 """
 System Prompt 配置管理 API
 对应模块: M1
+
+增强功能：
+- 支持自动注入 MCP 工具信息到系统提示词
+- 基于调研结果：参考 Cursor/Claude Desktop 的实现方式
 """
 
 from fastapi import APIRouter, Depends, status
@@ -16,6 +20,7 @@ from app.schemas.system_prompt import (
     SUPPORTED_MODELS
 )
 from app.services.system_prompt_service import SystemPromptService
+from app.services.mcp_tools_service import mcp_tools_service
 from app.core.exceptions import ContentTooLongError, SaveFailedError
 from app.core.default_prompts import DEFAULT_UI_CONFIG_PROMPT
 
@@ -182,4 +187,69 @@ async def get_available_models(db: AsyncSession = Depends(get_db)):
         models=[MODEL_INFO[model_id] for model_id in SUPPORTED_MODELS],
         current_model=current_model
     )
+
+
+@router.get("/with-mcp-tools")
+async def get_prompt_with_mcp_tools(
+    include_unavailable: bool = False,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    获取带有 MCP 工具信息的完整系统提示词
+    
+    这个端点会：
+    1. 获取当前配置的系统提示词
+    2. 动态获取所有已启用的 MCP 服务器的工具列表
+    3. 将工具信息格式化后追加到系统提示词末尾
+    
+    这是基于调研结果的最佳实践：
+    - 参考 Cursor/Claude Desktop 的 MCP 集成方式
+    - 将工具信息以结构化方式注入到系统提示词
+    
+    Args:
+        include_unavailable: 是否包含不可用的工具（默认不包含）
+    
+    Returns:
+        完整的系统提示词（包含 MCP 工具信息）和相关元数据
+    """
+    # 获取当前系统提示词
+    service = SystemPromptService(db)
+    prompt = await service.get_current_prompt()
+    base_prompt = prompt.prompt_content
+    
+    # 获取 MCP 工具信息
+    servers = await mcp_tools_service.get_all_enabled_servers(db)
+    mcp_snippet = mcp_tools_service.format_for_system_prompt(servers, include_unavailable)
+    
+    # 组合完整的系统提示词
+    full_prompt = base_prompt
+    if mcp_snippet.strip():
+        full_prompt = f"{base_prompt}\n{mcp_snippet}"
+    
+    # 统计信息
+    total_servers = len(servers)
+    total_tools = sum(len([t for t in s.tools if t.is_available or include_unavailable]) for s in servers)
+    available_tools = sum(len([t for t in s.tools if t.is_available]) for s in servers)
+    
+    return {
+        "success": True,
+        "full_prompt": full_prompt,
+        "base_prompt": base_prompt,
+        "mcp_snippet": mcp_snippet,
+        "base_prompt_length": len(base_prompt),
+        "full_prompt_length": len(full_prompt),
+        "mcp_info": {
+            "enabled_servers": total_servers,
+            "total_tools": total_tools,
+            "available_tools": available_tools,
+            "servers": [
+                {
+                    "name": s.name,
+                    "status": s.status,
+                    "tools_count": len(s.tools)
+                }
+                for s in servers
+            ]
+        }
+    }
 
