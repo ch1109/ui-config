@@ -620,8 +620,8 @@ class VLModelService:
     "en": "Page English Name"
   },
   "page_description": {
-    "zh-CN": "页面功能描述（列出用户可执行的操作）",
-    "en": "Page description"
+    "zh-CN": "页面功能描述，包含：\\n1. 功能概述\\n2. 用户可执行的操作\\n\\n## 行为规则\\nAI 行为约束...\\n\\n## 页面目标\\n用户目标...",
+    "en": "Page description with behavior rules and goals"
   },
   "elements": [
     {
@@ -634,10 +634,6 @@ class VLModelService:
   ],
   "button_list": ["button_id_1", "button_id_2"],
   "optional_actions": ["chat", "knowledge"],
-  "ai_context": {
-    "behavior_rules": "AI 在此页面的行为规则建议",
-    "page_goal": "页面的核心目标"
-  },
   "overall_confidence": 0.85,
   "clarification_needed": true,
   "clarification_questions": ["如果需要澄清，列出问题"]
@@ -645,9 +641,10 @@ class VLModelService:
 
 注意：
 1. element_id 使用 snake_case 格式
-2. 如果某些元素的用途不明确，请设置 clarification_needed 为 true，并在 clarification_questions 中提出具体问题
-3. confidence 取值 0-1，表示识别的置信度
-4. 请只输出 JSON，不要有其他文字
+2. page_description 应包含完整的上下文信息：功能说明、行为规则和页面目标
+3. 如果某些元素的用途不明确，请设置 clarification_needed 为 true，并在 clarification_questions 中提出具体问题
+4. confidence 取值 0-1，表示识别的置信度
+5. 请只输出 JSON，不要有其他文字
 """
     
     def _build_parse_result(self, data: dict) -> VLParseResult:

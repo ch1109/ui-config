@@ -75,6 +75,13 @@
                 System Prompt
               </h3>
               <div class="card-actions">
+                <button class="action-btn secondary" @click="handleCopy" :disabled="isLoading">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                    <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                  </svg>
+                  复制
+                </button>
                 <button class="action-btn secondary" @click="handleReset" :disabled="isLoading">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M1 4v6h6M23 20v-6h-6"/>
@@ -288,6 +295,29 @@ const handleModelChange = async () => {
 const handleInput = () => {
   if (promptContent.value.length > maxLength) {
     promptContent.value = promptContent.value.slice(0, maxLength)
+  }
+}
+
+// 复制提示词
+const handleCopy = async () => {
+  try {
+    await navigator.clipboard.writeText(promptContent.value)
+    message.success('已复制到剪贴板')
+  } catch (error) {
+    // 降级方案：使用 document.execCommand
+    const textarea = document.createElement('textarea')
+    textarea.value = promptContent.value
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    try {
+      document.execCommand('copy')
+      message.success('已复制到剪贴板')
+    } catch (e) {
+      message.error('复制失败，请手动复制')
+    }
+    document.body.removeChild(textarea)
   }
 }
 
