@@ -124,8 +124,24 @@ class PageConfig(Base):
     def get_full_description_en(self) -> str:
         """
         获取完整的英文描述（兼容旧数据）
+        如果 ai_context 中有数据，自动合并到描述中（使用英文标题）
         """
-        return self.description_en or ""
+        base_desc = self.description_en or ""
+        
+        # 检查旧的 ai_context 数据并合并（使用英文标题）
+        if self.ai_context:
+            parts = [base_desc] if base_desc else []
+            behavior_rules = self.ai_context.get("behavior_rules", "")
+            page_goal = self.ai_context.get("page_goal", "")
+            
+            if behavior_rules:
+                parts.append(f"\n\n## Behavior Rules\n{behavior_rules}")
+            if page_goal:
+                parts.append(f"\n\n## Page Goal\n{page_goal}")
+            
+            return "".join(parts).strip()
+        
+        return base_desc
     
     def to_config_json(self) -> dict:
         """转换为 UI Config JSON 格式"""

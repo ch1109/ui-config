@@ -275,20 +275,29 @@ const syncFromProps = () => {
       'zh-CN': props.config.name?.['zh-CN'] || '',
       en: props.config.name?.en || ''
     }
-    // 如果有旧的 ai_context 数据，合并到描述中
+    // 如果有旧的 ai_context 数据，合并到中文和英文描述中
     let descZh = props.config.description?.['zh-CN'] || ''
+    let descEn = props.config.description?.en || ''
     if (props.config.ai_context) {
       const { behavior_rules, page_goal } = props.config.ai_context
+      // 合并到中文描述
       if (behavior_rules && !descZh.includes('## 行为规则')) {
         descZh += `\n\n## 行为规则\n${behavior_rules}`
       }
       if (page_goal && !descZh.includes('## 页面目标')) {
         descZh += `\n\n## 页面目标\n${page_goal}`
       }
+      // 合并到英文描述
+      if (behavior_rules && !descEn.includes('## Behavior Rules')) {
+        descEn += `\n\n## Behavior Rules\n${behavior_rules}`
+      }
+      if (page_goal && !descEn.includes('## Page Goal')) {
+        descEn += `\n\n## Page Goal\n${page_goal}`
+      }
     }
     localConfig.description = {
       'zh-CN': descZh.trim(),
-      en: props.config.description?.en || ''
+      en: descEn.trim()
     }
     localConfig.button_list = props.config.button_list?.length 
       ? [...props.config.button_list] 

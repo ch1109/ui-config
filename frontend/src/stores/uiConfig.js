@@ -2,9 +2,9 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 
 /**
- * 将旧的 ai_context 数据合并到描述中
+ * 将旧的 ai_context 数据合并到中文描述中
  */
-function mergeAiContextToDescription(description, aiContext) {
+function mergeAiContextToDescriptionZh(description, aiContext) {
   if (!aiContext) return description
   
   let result = description || ''
@@ -15,6 +15,25 @@ function mergeAiContextToDescription(description, aiContext) {
   }
   if (page_goal && !result.includes('## 页面目标')) {
     result += `\n\n## 页面目标\n${page_goal}`
+  }
+  
+  return result.trim()
+}
+
+/**
+ * 将旧的 ai_context 数据合并到英文描述中
+ */
+function mergeAiContextToDescriptionEn(description, aiContext) {
+  if (!aiContext) return description
+  
+  let result = description || ''
+  const { behavior_rules, page_goal } = aiContext
+  
+  if (behavior_rules && !result.includes('## Behavior Rules')) {
+    result += `\n\n## Behavior Rules\n${behavior_rules}`
+  }
+  if (page_goal && !result.includes('## Page Goal')) {
+    result += `\n\n## Page Goal\n${page_goal}`
   }
   
   return result.trim()
@@ -77,14 +96,16 @@ export const useUiConfigStore = defineStore('uiConfig', () => {
       }
     }
     if (aiConfig.page_description) {
-      // 如果 AI 返回了 ai_context，将其合并到描述中
+      // 如果 AI 返回了 ai_context，将其合并到中文和英文描述中
       let descZh = aiConfig.page_description['zh-CN'] || ''
+      let descEn = aiConfig.page_description.en || ''
       if (aiConfig.ai_context) {
-        descZh = mergeAiContextToDescription(descZh, aiConfig.ai_context)
+        descZh = mergeAiContextToDescriptionZh(descZh, aiConfig.ai_context)
+        descEn = mergeAiContextToDescriptionEn(descEn, aiConfig.ai_context)
       }
       draftConfig.value.description = {
         'zh-CN': descZh,
-        en: aiConfig.page_description.en || ''
+        en: descEn
       }
     }
     if (aiConfig.button_list) {
@@ -116,15 +137,18 @@ export const useUiConfigStore = defineStore('uiConfig', () => {
   
   // 设置原始配置
   function setOriginalConfig(config) {
-    // 兼容旧数据：如果有 ai_context，合并到 description
+    // 兼容旧数据：如果有 ai_context，合并到 description（中文和英文）
     const normalizedConfig = { ...config }
     if (config.ai_context && config.description) {
       normalizedConfig.description = {
-        'zh-CN': mergeAiContextToDescription(
+        'zh-CN': mergeAiContextToDescriptionZh(
           config.description['zh-CN'] || '',
           config.ai_context
         ),
-        en: config.description.en || ''
+        en: mergeAiContextToDescriptionEn(
+          config.description.en || '',
+          config.ai_context
+        )
       }
     }
     // 移除 ai_context 字段

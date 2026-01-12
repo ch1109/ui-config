@@ -439,12 +439,10 @@ async def get_page(page_id: str, db: AsyncSession = Depends(get_db)):
     )
 
 
-def _merge_ai_context_to_description(base_description: str, ai_context) -> str:
-    """将旧的 ai_context 数据合并到描述中"""
+def _get_ai_context_values(ai_context):
+    """从 ai_context 中提取 behavior_rules 和 page_goal"""
     if not ai_context:
-        return base_description
-    
-    parts = [base_description] if base_description else []
+        return None, None
     
     behavior_rules = getattr(ai_context, 'behavior_rules', None) or (
         ai_context.get("behavior_rules") if isinstance(ai_context, dict) else None
@@ -453,10 +451,37 @@ def _merge_ai_context_to_description(base_description: str, ai_context) -> str:
         ai_context.get("page_goal") if isinstance(ai_context, dict) else None
     )
     
+    return behavior_rules, page_goal
+
+
+def _merge_ai_context_to_description_zh(base_description: str, ai_context) -> str:
+    """将旧的 ai_context 数据合并到中文描述中"""
+    behavior_rules, page_goal = _get_ai_context_values(ai_context)
+    if not behavior_rules and not page_goal:
+        return base_description
+    
+    parts = [base_description] if base_description else []
+    
     if behavior_rules:
         parts.append(f"\n\n## 行为规则\n{behavior_rules}")
     if page_goal:
         parts.append(f"\n\n## 页面目标\n{page_goal}")
+    
+    return "".join(parts).strip()
+
+
+def _merge_ai_context_to_description_en(base_description: str, ai_context) -> str:
+    """将旧的 ai_context 数据合并到英文描述中"""
+    behavior_rules, page_goal = _get_ai_context_values(ai_context)
+    if not behavior_rules and not page_goal:
+        return base_description
+    
+    parts = [base_description] if base_description else []
+    
+    if behavior_rules:
+        parts.append(f"\n\n## Behavior Rules\n{behavior_rules}")
+    if page_goal:
+        parts.append(f"\n\n## Page Goal\n{page_goal}")
     
     return "".join(parts).strip()
 
@@ -493,17 +518,19 @@ async def create_page(
             )
         project_name = project.name
     
-    # 如果有 ai_context，将其合并到描述中
+    # 如果有 ai_context，将其合并到中文和英文描述中
     description_zh = config.description.zh_CN
+    description_en = config.description.en
     if config.ai_context:
-        description_zh = _merge_ai_context_to_description(description_zh, config.ai_context)
+        description_zh = _merge_ai_context_to_description_zh(description_zh, config.ai_context)
+        description_en = _merge_ai_context_to_description_en(description_en, config.ai_context)
     
     page = PageConfig(
         page_id=config.page_id,
         name_zh=config.name.zh_CN,
         name_en=config.name.en,
         description_zh=description_zh,
-        description_en=config.description.en,
+        description_en=description_en,
         button_list=config.button_list,
         optional_actions=config.optional_actions,
         # ai_context 不再单独存储，已合并到 description
@@ -561,16 +588,22 @@ async def update_page(
         page.name_zh = config.name.zh_CN
         page.name_en = config.name.en
     if config.description:
-        # 如果同时提供了 ai_context，将其合并到描述中
+        # 如果同时提供了 ai_context，将其合并到中文和英文描述中
         description_zh = config.description.zh_CN
+        description_en = config.description.en
         if config.ai_context:
-            description_zh = _merge_ai_context_to_description(description_zh, config.ai_context)
+            description_zh = _merge_ai_context_to_description_zh(description_zh, config.ai_context)
+            description_en = _merge_ai_context_to_description_en(description_en, config.ai_context)
         page.description_zh = description_zh
-        page.description_en = config.description.en
+        page.description_en = description_en
     elif config.ai_context:
         # 只有 ai_context 没有 description，合并到现有描述
-        page.description_zh = _merge_ai_context_to_description(
+        page.description_zh = _merge_ai_context_to_description_zh(
             page.description_zh or "", 
+            config.ai_context
+        )
+        page.description_en = _merge_ai_context_to_description_en(
+            page.description_en or "", 
             config.ai_context
         )
     

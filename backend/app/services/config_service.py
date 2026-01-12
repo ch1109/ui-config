@@ -173,22 +173,13 @@ class ConfigService:
         
         return errors
     
-    def _merge_ai_context_to_description(
+    def _merge_ai_context_to_description_zh(
         self,
         base_description: str,
         ai_context: Optional[Dict[str, Any]]
     ) -> str:
         """
-        将旧的 ai_context 数据合并到描述中
-        
-        格式:
-        {base_description}
-        
-        ## 行为规则
-        {behavior_rules}
-        
-        ## 页面目标
-        {page_goal}
+        将旧的 ai_context 数据合并到中文描述中
         """
         if not ai_context:
             return base_description
@@ -202,6 +193,29 @@ class ConfigService:
             parts.append(f"\n\n## 行为规则\n{behavior_rules}")
         if page_goal:
             parts.append(f"\n\n## 页面目标\n{page_goal}")
+        
+        return "".join(parts).strip()
+    
+    def _merge_ai_context_to_description_en(
+        self,
+        base_description: str,
+        ai_context: Optional[Dict[str, Any]]
+    ) -> str:
+        """
+        将旧的 ai_context 数据合并到英文描述中
+        """
+        if not ai_context:
+            return base_description
+        
+        parts = [base_description] if base_description else []
+        
+        behavior_rules = ai_context.get("behavior_rules", "")
+        page_goal = ai_context.get("page_goal", "")
+        
+        if behavior_rules:
+            parts.append(f"\n\n## Behavior Rules\n{behavior_rules}")
+        if page_goal:
+            parts.append(f"\n\n## Page Goal\n{page_goal}")
         
         return "".join(parts).strip()
     
@@ -234,10 +248,11 @@ class ConfigService:
         desc_zh = description.get("zh-CN") or description.get("zh_CN") or page_description.get("zh-CN", "")
         desc_en = description.get("en") or page_description.get("en", "")
         
-        # 如果有 ai_context，将其合并到描述中（兼容旧数据）
+        # 如果有 ai_context，将其合并到中文和英文描述中（兼容旧数据）
         ai_context = page_data.get("ai_context")
         if ai_context:
-            desc_zh = self._merge_ai_context_to_description(desc_zh, ai_context)
+            desc_zh = self._merge_ai_context_to_description_zh(desc_zh, ai_context)
+            desc_en = self._merge_ai_context_to_description_en(desc_en, ai_context)
         
         if existing:
             # 更新
