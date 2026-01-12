@@ -2,6 +2,9 @@
 """
 页面配置数据模型
 对应任务: T2.1.1, T2.1.3
+
+变更历史:
+- 2026-01: ai_context 字段已废弃，行为规则和页面目标现在合并到 description_zh/description_en 中
 """
 
 from sqlalchemy import Column, Integer, String, Text, JSON, DateTime, Enum, ForeignKey
@@ -49,11 +52,11 @@ class PageConfig(Base):
     )
     description_zh = Column(
         Text,
-        comment="页面中文描述"
+        comment="页面中文描述（包含行为规则和页面目标）"
     )
     description_en = Column(
         Text,
-        comment="页面英文描述"
+        comment="页面英文描述（包含行为规则和页面目标）"
     )
     button_list = Column(
         JSON, 
@@ -69,9 +72,10 @@ class PageConfig(Base):
         String(500),
         comment="页面截图 URL"
     )
+    # @deprecated - 此字段已废弃，保留用于向后兼容
     ai_context = Column(
         JSON,
-        comment="AI 上下文配置 (行为规则、页面目标)"
+        comment="[已废弃] AI 上下文配置，现已合并到 description 字段"
     )
     status = Column(
         String(20), 
@@ -95,6 +99,34 @@ class PageConfig(Base):
     def __repr__(self):
         return f"<PageConfig(id={self.id}, page_id={self.page_id})>"
     
+    def get_full_description_zh(self) -> str:
+        """
+        获取完整的中文描述（兼容旧数据）
+        如果 ai_context 中有数据，自动合并到描述中
+        """
+        base_desc = self.description_zh or ""
+        
+        # 检查旧的 ai_context 数据并合并
+        if self.ai_context:
+            parts = [base_desc] if base_desc else []
+            behavior_rules = self.ai_context.get("behavior_rules", "")
+            page_goal = self.ai_context.get("page_goal", "")
+            
+            if behavior_rules:
+                parts.append(f"\n\n## 行为规则\n{behavior_rules}")
+            if page_goal:
+                parts.append(f"\n\n## 页面目标\n{page_goal}")
+            
+            return "".join(parts).strip()
+        
+        return base_desc
+    
+    def get_full_description_en(self) -> str:
+        """
+        获取完整的英文描述（兼容旧数据）
+        """
+        return self.description_en or ""
+    
     def to_config_json(self) -> dict:
         """转换为 UI Config JSON 格式"""
         return {
@@ -104,8 +136,8 @@ class PageConfig(Base):
                     "en": self.name_en
                 },
                 "description": {
-                    "zh-CN": self.description_zh or "",
-                    "en": self.description_en or ""
+                    "zh-CN": self.get_full_description_zh(),
+                    "en": self.get_full_description_en()
                 },
                 "buttonList": self.button_list or [],
                 "optionalActions": self.optional_actions or []

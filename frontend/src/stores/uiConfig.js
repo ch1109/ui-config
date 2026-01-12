@@ -1,15 +1,33 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 
+/**
+ * 将旧的 ai_context 数据合并到描述中
+ */
+function mergeAiContextToDescription(description, aiContext) {
+  if (!aiContext) return description
+  
+  let result = description || ''
+  const { behavior_rules, page_goal } = aiContext
+  
+  if (behavior_rules && !result.includes('## 行为规则')) {
+    result += `\n\n## 行为规则\n${behavior_rules}`
+  }
+  if (page_goal && !result.includes('## 页面目标')) {
+    result += `\n\n## 页面目标\n${page_goal}`
+  }
+  
+  return result.trim()
+}
+
 export const useUiConfigStore = defineStore('uiConfig', () => {
-  // 当前编辑的配置
+  // 当前编辑的配置（ai_context 已废弃，数据合并到 description）
   const draftConfig = ref({
     page_id: '',
     name: { 'zh-CN': '', en: '' },
     description: { 'zh-CN': '', en: '' },
     button_list: [],
-    optional_actions: [],
-    ai_context: { behavior_rules: '', page_goal: '' }
+    optional_actions: []
   })
   
   // 原始配置（用于比较是否修改）
@@ -59,8 +77,13 @@ export const useUiConfigStore = defineStore('uiConfig', () => {
       }
     }
     if (aiConfig.page_description) {
+      // 如果 AI 返回了 ai_context，将其合并到描述中
+      let descZh = aiConfig.page_description['zh-CN'] || ''
+      if (aiConfig.ai_context) {
+        descZh = mergeAiContextToDescription(descZh, aiConfig.ai_context)
+      }
       draftConfig.value.description = {
-        'zh-CN': aiConfig.page_description['zh-CN'] || '',
+        'zh-CN': descZh,
         en: aiConfig.page_description.en || ''
       }
     }
@@ -69,9 +92,6 @@ export const useUiConfigStore = defineStore('uiConfig', () => {
     }
     if (aiConfig.optional_actions) {
       draftConfig.value.optional_actions = aiConfig.optional_actions
-    }
-    if (aiConfig.ai_context) {
-      draftConfig.value.ai_context = aiConfig.ai_context
     }
   }
   
@@ -87,8 +107,7 @@ export const useUiConfigStore = defineStore('uiConfig', () => {
       name: { 'zh-CN': '', en: '' },
       description: { 'zh-CN': '', en: '' },
       button_list: [],
-      optional_actions: [],
-      ai_context: { behavior_rules: '', page_goal: '' }
+      optional_actions: []
     }
     originalConfig.value = null
     isDirty.value = false
@@ -97,8 +116,22 @@ export const useUiConfigStore = defineStore('uiConfig', () => {
   
   // 设置原始配置
   function setOriginalConfig(config) {
-    originalConfig.value = JSON.parse(JSON.stringify(config))
-    draftConfig.value = JSON.parse(JSON.stringify(config))
+    // 兼容旧数据：如果有 ai_context，合并到 description
+    const normalizedConfig = { ...config }
+    if (config.ai_context && config.description) {
+      normalizedConfig.description = {
+        'zh-CN': mergeAiContextToDescription(
+          config.description['zh-CN'] || '',
+          config.ai_context
+        ),
+        en: config.description.en || ''
+      }
+    }
+    // 移除 ai_context 字段
+    delete normalizedConfig.ai_context
+    
+    originalConfig.value = JSON.parse(JSON.stringify(normalizedConfig))
+    draftConfig.value = JSON.parse(JSON.stringify(normalizedConfig))
     isDirty.value = false
   }
   

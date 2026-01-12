@@ -211,13 +211,13 @@ onMounted(async () => {
   if (!isNew.value && route.params.id) {
     try {
       const response = await pageConfigApi.get(route.params.id)
+      // ai_context 已废弃，数据现在合并在 description 中
       store.setOriginalConfig({
         page_id: response.page_id,
         name: response.name,
         description: response.description,
         button_list: response.button_list || [],
-        optional_actions: response.optional_actions || [],
-        ai_context: response.ai_context || { behavior_rules: '', page_goal: '' }
+        optional_actions: response.optional_actions || []
       })
       imageUrl.value = response.screenshot_url || ''
     } catch (error) {
@@ -378,13 +378,13 @@ const handleSave = async () => {
   
   try {
     const config = store.draftConfig
+    // ai_context 已废弃，不再单独发送
     const saveData = {
       page_id: config.page_id,
       name: config.name,
       description: config.description,
       button_list: config.button_list.filter(b => b.trim()),
       optional_actions: config.optional_actions.filter(a => a.trim()),
-      ai_context: config.ai_context,
       screenshot_url: imageUrl.value
     }
     

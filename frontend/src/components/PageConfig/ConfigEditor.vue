@@ -63,22 +63,51 @@
         </div>
         
         <div class="form-field full-width">
-          <label>页面描述 (中文)</label>
+          <label>
+            页面描述 (中文)
+            <span class="label-hint">包含功能说明、行为规则和页面目标</span>
+          </label>
           <textarea 
             v-model="localConfig.description['zh-CN']"
-            class="form-textarea"
-            rows="3"
-            placeholder="描述此页面的功能和用户可执行的操作..."
+            class="form-textarea description-textarea"
+            rows="8"
+            :placeholder="descriptionPlaceholder"
             @input="handleChange"
           ></textarea>
+          <div class="field-help">
+            <button type="button" class="help-toggle" @click="showDescriptionHelp = !showDescriptionHelp">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M12 16v-4M12 8h.01"/>
+              </svg>
+              {{ showDescriptionHelp ? '收起格式说明' : '查看格式说明' }}
+            </button>
+            <div v-if="showDescriptionHelp" class="help-content">
+              <p><strong>推荐格式：</strong></p>
+              <pre>页面功能概述...
+
+用户可执行的操作：
+- 操作1
+- 操作2
+
+## 行为规则
+AI 在此页面应遵循的约束...
+
+## 页面目标
+用户在此页面的主要目标...</pre>
+            </div>
+          </div>
         </div>
         
         <div class="form-field full-width">
-          <label>Page Description (EN)</label>
+          <label>
+            Page Description (EN)
+            <span class="label-hint">Optional</span>
+          </label>
           <textarea 
             v-model="localConfig.description.en"
             class="form-textarea"
-            rows="3"
+            rows="4"
             placeholder="Describe the page features and available user actions..."
             @input="handleChange"
           ></textarea>
@@ -178,46 +207,11 @@
       </div>
     </section>
     
-    <!-- AI 上下文区 -->
-    <section class="section">
-      <div class="section-header">
-        <div class="section-icon success">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 2a2 2 0 012 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 017 7h1a1 1 0 110 2h-1.07A7 7 0 0113 23a7 7 0 01-7.07-7H5a1 1 0 110-2h1a7 7 0 017-7h1V5.73A2 2 0 0112 2z"/>
-          </svg>
-        </div>
-        <h3>AI 上下文</h3>
-      </div>
-      
-      <div class="form-grid">
-        <div class="form-field full-width">
-          <label>行为规则</label>
-          <textarea 
-            v-model="localConfig.ai_context.behavior_rules"
-            class="form-textarea"
-            rows="3"
-            placeholder="定义 AI 在此页面的行为规则..."
-            @input="handleChange"
-          ></textarea>
-        </div>
-        
-        <div class="form-field full-width">
-          <label>页面目标</label>
-          <textarea 
-            v-model="localConfig.ai_context.page_goal"
-            class="form-textarea"
-            rows="2"
-            placeholder="定义 AI 应该帮助用户达成的目标..."
-            @input="handleChange"
-          ></textarea>
-        </div>
-      </div>
-    </section>
   </div>
 </template>
 
 <script setup>
-import { reactive, watch, onMounted } from 'vue'
+import { reactive, watch, onMounted, ref } from 'vue'
 
 const props = defineProps({
   config: {
@@ -233,14 +227,34 @@ const props = defineProps({
 
 const emit = defineEmits(['config-changed'])
 
+// 显示帮助提示
+const showDescriptionHelp = ref(false)
+
+// 描述占位符
+const descriptionPlaceholder = `描述此页面的功能和用户可执行的操作...
+
+示例格式：
+用户中心是管理个人信息的核心页面。
+
+用户可执行的操作：
+- 修改头像和昵称
+- 更新联系方式
+- 修改密码
+
+## 行为规则
+- 引导用户完善必填信息
+- 敏感操作需二次确认
+
+## 页面目标
+帮助用户维护个人信息，确保账户安全`
+
 // 本地配置副本
 const localConfig = reactive({
   page_id: '',
   name: { 'zh-CN': '', en: '' },
   description: { 'zh-CN': '', en: '' },
   button_list: [''],
-  optional_actions: [],
-  ai_context: { behavior_rules: '', page_goal: '' }
+  optional_actions: []
 })
 
 // 初始化
@@ -261,8 +275,19 @@ const syncFromProps = () => {
       'zh-CN': props.config.name?.['zh-CN'] || '',
       en: props.config.name?.en || ''
     }
+    // 如果有旧的 ai_context 数据，合并到描述中
+    let descZh = props.config.description?.['zh-CN'] || ''
+    if (props.config.ai_context) {
+      const { behavior_rules, page_goal } = props.config.ai_context
+      if (behavior_rules && !descZh.includes('## 行为规则')) {
+        descZh += `\n\n## 行为规则\n${behavior_rules}`
+      }
+      if (page_goal && !descZh.includes('## 页面目标')) {
+        descZh += `\n\n## 页面目标\n${page_goal}`
+      }
+    }
     localConfig.description = {
-      'zh-CN': props.config.description?.['zh-CN'] || '',
+      'zh-CN': descZh.trim(),
       en: props.config.description?.en || ''
     }
     localConfig.button_list = props.config.button_list?.length 
@@ -271,10 +296,6 @@ const syncFromProps = () => {
     localConfig.optional_actions = props.config.optional_actions 
       ? [...props.config.optional_actions] 
       : []
-    localConfig.ai_context = {
-      behavior_rules: props.config.ai_context?.behavior_rules || '',
-      page_goal: props.config.ai_context?.page_goal || ''
-    }
   }
 }
 
@@ -285,8 +306,7 @@ const handleChange = () => {
     name: { ...localConfig.name },
     description: { ...localConfig.description },
     button_list: [...localConfig.button_list],
-    optional_actions: [...localConfig.optional_actions],
-    ai_context: { ...localConfig.ai_context }
+    optional_actions: [...localConfig.optional_actions]
   })
 }
 
@@ -438,6 +458,12 @@ const removeAction = (index) => {
   resize: vertical;
   min-height: 80px;
   line-height: 1.6;
+  
+  &.description-textarea {
+    min-height: 180px;
+    font-family: var(--font-mono, 'SF Mono', 'Monaco', 'Consolas', monospace);
+    font-size: 13px;
+  }
 }
 
 .field-hint {
@@ -446,6 +472,68 @@ const removeAction = (index) => {
   
   &.error {
     color: var(--error);
+  }
+}
+
+.label-hint {
+  font-weight: 400;
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-left: 8px;
+}
+
+.field-help {
+  margin-top: 8px;
+}
+
+.help-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  
+  svg {
+    width: 14px;
+    height: 14px;
+  }
+  
+  &:hover {
+    background: var(--bg-subtle);
+    color: var(--primary);
+  }
+}
+
+.help-content {
+  margin-top: 12px;
+  padding: 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  
+  p {
+    margin: 0 0 12px 0;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+  
+  pre {
+    margin: 0;
+    padding: 12px;
+    background: var(--bg-subtle);
+    border-radius: 8px;
+    font-size: 12px;
+    font-family: var(--font-mono, 'SF Mono', 'Monaco', 'Consolas', monospace);
+    color: var(--text-primary);
+    line-height: 1.6;
+    white-space: pre-wrap;
+    overflow-x: auto;
   }
 }
 

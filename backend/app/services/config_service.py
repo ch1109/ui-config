@@ -173,12 +173,48 @@ class ConfigService:
         
         return errors
     
+    def _merge_ai_context_to_description(
+        self,
+        base_description: str,
+        ai_context: Optional[Dict[str, Any]]
+    ) -> str:
+        """
+        将旧的 ai_context 数据合并到描述中
+        
+        格式:
+        {base_description}
+        
+        ## 行为规则
+        {behavior_rules}
+        
+        ## 页面目标
+        {page_goal}
+        """
+        if not ai_context:
+            return base_description
+        
+        parts = [base_description] if base_description else []
+        
+        behavior_rules = ai_context.get("behavior_rules", "")
+        page_goal = ai_context.get("page_goal", "")
+        
+        if behavior_rules:
+            parts.append(f"\n\n## 行为规则\n{behavior_rules}")
+        if page_goal:
+            parts.append(f"\n\n## 页面目标\n{page_goal}")
+        
+        return "".join(parts).strip()
+    
     async def save_page_config(
         self,
         page_data: Dict[str, Any],
         session_id: Optional[str] = None
     ) -> PageConfig:
-        """保存页面配置到数据库"""
+        """
+        保存页面配置到数据库
+        
+        注意: ai_context 数据会自动合并到 description 中
+        """
         page_id = page_data.get("page_id", "unnamed_page")
         
         # 检查是否存在
@@ -198,6 +234,11 @@ class ConfigService:
         desc_zh = description.get("zh-CN") or description.get("zh_CN") or page_description.get("zh-CN", "")
         desc_en = description.get("en") or page_description.get("en", "")
         
+        # 如果有 ai_context，将其合并到描述中（兼容旧数据）
+        ai_context = page_data.get("ai_context")
+        if ai_context:
+            desc_zh = self._merge_ai_context_to_description(desc_zh, ai_context)
+        
         if existing:
             # 更新
             existing.name_zh = name_zh
@@ -206,7 +247,8 @@ class ConfigService:
             existing.description_en = desc_en
             existing.button_list = page_data.get("button_list", [])
             existing.optional_actions = page_data.get("optional_actions", [])
-            existing.ai_context = page_data.get("ai_context")
+            # ai_context 不再存储到单独字段，已合并到 description
+            existing.ai_context = None
             existing.status = "configured"
             page = existing
         else:
@@ -219,7 +261,8 @@ class ConfigService:
                 description_en=desc_en,
                 button_list=page_data.get("button_list", []),
                 optional_actions=page_data.get("optional_actions", []),
-                ai_context=page_data.get("ai_context"),
+                # ai_context 不再存储到单独字段，已合并到 description
+                ai_context=None,
                 screenshot_url=page_data.get("screenshot_url"),
                 status="configured"
             )

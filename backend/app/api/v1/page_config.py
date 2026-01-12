@@ -417,14 +417,19 @@ async def get_page(page_id: str, db: AsyncSession = Depends(get_db)):
     
     page, project_name = row
     
+    # 使用兼容方法获取完整描述（包含旧 ai_context 数据）
     return PageConfigResponse(
         id=page.id,
         page_id=page.page_id,
         name=MultiLangText(**{"zh-CN": page.name_zh, "en": page.name_en}),
-        description=MultiLangText(**{"zh-CN": page.description_zh or "", "en": page.description_en or ""}),
+        description=MultiLangText(**{
+            "zh-CN": page.get_full_description_zh(),
+            "en": page.get_full_description_en()
+        }),
         button_list=page.button_list or [],
         optional_actions=page.optional_actions or [],
-        ai_context=AIContext(**page.ai_context) if page.ai_context else None,
+        # ai_context 已废弃，返回 None（旧数据已合并到 description）
+        ai_context=None,
         screenshot_url=page.screenshot_url,
         project_id=page.project_id,
         project_name=project_name,
@@ -432,6 +437,28 @@ async def get_page(page_id: str, db: AsyncSession = Depends(get_db)):
         created_at=page.created_at,
         updated_at=page.updated_at
     )
+
+
+def _merge_ai_context_to_description(base_description: str, ai_context) -> str:
+    """将旧的 ai_context 数据合并到描述中"""
+    if not ai_context:
+        return base_description
+    
+    parts = [base_description] if base_description else []
+    
+    behavior_rules = getattr(ai_context, 'behavior_rules', None) or (
+        ai_context.get("behavior_rules") if isinstance(ai_context, dict) else None
+    )
+    page_goal = getattr(ai_context, 'page_goal', None) or (
+        ai_context.get("page_goal") if isinstance(ai_context, dict) else None
+    )
+    
+    if behavior_rules:
+        parts.append(f"\n\n## 行为规则\n{behavior_rules}")
+    if page_goal:
+        parts.append(f"\n\n## 页面目标\n{page_goal}")
+    
+    return "".join(parts).strip()
 
 
 @router.post("", response_model=PageConfigResponse)
@@ -466,15 +493,21 @@ async def create_page(
             )
         project_name = project.name
     
+    # 如果有 ai_context，将其合并到描述中
+    description_zh = config.description.zh_CN
+    if config.ai_context:
+        description_zh = _merge_ai_context_to_description(description_zh, config.ai_context)
+    
     page = PageConfig(
         page_id=config.page_id,
         name_zh=config.name.zh_CN,
         name_en=config.name.en,
-        description_zh=config.description.zh_CN,
+        description_zh=description_zh,
         description_en=config.description.en,
         button_list=config.button_list,
         optional_actions=config.optional_actions,
-        ai_context=config.ai_context.model_dump() if config.ai_context else None,
+        # ai_context 不再单独存储，已合并到 description
+        ai_context=None,
         screenshot_url=config.screenshot_url,
         project_id=config.project_id,
         status="configured"
@@ -488,10 +521,14 @@ async def create_page(
         id=page.id,
         page_id=page.page_id,
         name=config.name,
-        description=config.description,
+        description=MultiLangText(**{
+            "zh-CN": page.get_full_description_zh(),
+            "en": page.get_full_description_en()
+        }),
         button_list=page.button_list,
         optional_actions=page.optional_actions,
-        ai_context=config.ai_context,
+        # ai_context 已废弃，返回 None
+        ai_context=None,
         screenshot_url=page.screenshot_url,
         project_id=page.project_id,
         project_name=project_name,
@@ -524,14 +561,27 @@ async def update_page(
         page.name_zh = config.name.zh_CN
         page.name_en = config.name.en
     if config.description:
-        page.description_zh = config.description.zh_CN
+        # 如果同时提供了 ai_context，将其合并到描述中
+        description_zh = config.description.zh_CN
+        if config.ai_context:
+            description_zh = _merge_ai_context_to_description(description_zh, config.ai_context)
+        page.description_zh = description_zh
         page.description_en = config.description.en
+    elif config.ai_context:
+        # 只有 ai_context 没有 description，合并到现有描述
+        page.description_zh = _merge_ai_context_to_description(
+            page.description_zh or "", 
+            config.ai_context
+        )
+    
     if config.button_list is not None:
         page.button_list = config.button_list
     if config.optional_actions is not None:
         page.optional_actions = config.optional_actions
-    if config.ai_context:
-        page.ai_context = config.ai_context.model_dump()
+    
+    # ai_context 不再单独存储，清空旧字段
+    page.ai_context = None
+    
     if config.screenshot_url is not None:
         page.screenshot_url = config.screenshot_url
     
@@ -568,10 +618,14 @@ async def update_page(
         id=page.id,
         page_id=page.page_id,
         name=MultiLangText(**{"zh-CN": page.name_zh, "en": page.name_en}),
-        description=MultiLangText(**{"zh-CN": page.description_zh or "", "en": page.description_en or ""}),
+        description=MultiLangText(**{
+            "zh-CN": page.get_full_description_zh(),
+            "en": page.get_full_description_en()
+        }),
         button_list=page.button_list or [],
         optional_actions=page.optional_actions or [],
-        ai_context=AIContext(**page.ai_context) if page.ai_context else None,
+        # ai_context 已废弃，返回 None
+        ai_context=None,
         screenshot_url=page.screenshot_url,
         project_id=page.project_id,
         project_name=project_name,

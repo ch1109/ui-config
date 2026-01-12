@@ -1,6 +1,9 @@
 # app/schemas/page_config.py
 """
 页面配置 Pydantic Schema
+
+变更历史:
+- 2026-01: ai_context 字段已废弃，行为规则和页面目标现在合并到 description 中
 """
 
 from pydantic import BaseModel, Field, field_validator
@@ -18,9 +21,14 @@ class MultiLangText(BaseModel):
 
 
 class AIContext(BaseModel):
-    """AI 上下文配置"""
-    behavior_rules: Optional[str] = Field(None, description="AI 行为规则")
-    page_goal: Optional[str] = Field(None, description="页面目标")
+    """
+    AI 上下文配置
+    
+    @deprecated 此字段已废弃，行为规则和页面目标现在应合并到 description 字段中。
+    保留此类仅用于向后兼容旧数据的读取。
+    """
+    behavior_rules: Optional[str] = Field(None, description="[已废弃] AI 行为规则，请使用 description 字段")
+    page_goal: Optional[str] = Field(None, description="[已废弃] 页面目标，请使用 description 字段")
 
 
 class PageConfigBase(BaseModel):
@@ -32,10 +40,17 @@ class PageConfigBase(BaseModel):
         description="页面唯一标识，英文标识"
     )
     name: MultiLangText
-    description: MultiLangText
+    description: MultiLangText = Field(
+        ...,
+        description="页面描述（可包含行为规则和页面目标）"
+    )
     button_list: List[str] = Field(default=[], min_length=1)
     optional_actions: List[str] = Field(default=[])
-    ai_context: Optional[AIContext] = None
+    # @deprecated - 保留用于向后兼容，新数据不应使用此字段
+    ai_context: Optional[AIContext] = Field(
+        None, 
+        description="[已废弃] AI 上下文，现已合并到 description 字段"
+    )
     
     @field_validator('page_id')
     @classmethod
@@ -64,7 +79,11 @@ class PageConfigUpdate(BaseModel):
     description: Optional[MultiLangText] = None
     button_list: Optional[List[str]] = None
     optional_actions: Optional[List[str]] = None
-    ai_context: Optional[AIContext] = None
+    # @deprecated - 保留用于向后兼容
+    ai_context: Optional[AIContext] = Field(
+        None,
+        description="[已废弃] AI 上下文，现已合并到 description 字段"
+    )
     screenshot_url: Optional[str] = None
     project_id: Optional[int] = None
     
@@ -84,7 +103,11 @@ class PageConfigResponse(BaseModel):
     description: MultiLangText
     button_list: List[str]
     optional_actions: List[str]
-    ai_context: Optional[AIContext] = None
+    # @deprecated - 保留用于向后兼容
+    ai_context: Optional[AIContext] = Field(
+        None,
+        description="[已废弃] 此字段将在未来版本移除"
+    )
     screenshot_url: Optional[str] = None
     project_id: Optional[int] = None
     project_name: Optional[str] = None
