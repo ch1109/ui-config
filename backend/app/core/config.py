@@ -6,7 +6,11 @@
 
 from pydantic_settings import BaseSettings
 from typing import Optional, Literal
+from dotenv import load_dotenv
 import os
+
+# 加载 API.env 到 os.environ，使 STDIO MCP 服务器可以继承这些环境变量
+load_dotenv("API.env")
 
 
 class Settings(BaseSettings):
@@ -65,8 +69,8 @@ class Settings(BaseSettings):
     class Config:
         env_file = "API.env"
         env_file_encoding = "utf-8"
+        extra = "ignore"
 
 
 # 全局配置实例
 settings = Settings()
-

@@ -41,6 +41,26 @@ PRESET_MCP_SERVERS = {
         "tools": ["echo", "add", "longRunningOperation", "sampleLLM", "getTinyImage", "printEnv", "annotatedMessage"],
         "is_preset": True,
         "requires_node": True
+    },
+    "wttr": {
+        "name": "Wttr天气",
+        "description": "基于 wttr.in 免费 API 的天气服务器，提供天气查询和日期时间功能，无需 API Key",
+        "transport": "stdio",
+        "command": "npx",
+        "args": ["-y", "wttr-mcp-server@latest"],
+        "tools": ["get_weather_wttr", "get_datetime"],
+        "is_preset": True,
+        "requires_node": True
+    },
+    "hefeng": {
+        "name": "和风天气",
+        "description": "和风天气 MCP 服务器，提供实时天气查询、天气预报、空气质量等功能",
+        "transport": "stdio",
+        "command": "npx",
+        "args": ["-y", "hefeng-mcp-server", "--apiKey=fd4980bfce0c4b3d8adb26a213002e30", "--apiUrl=https://ku44uacf7g.re.qweatherapi.com"],
+        "tools": ["get_location_id", "get_weather", "get_indices"],
+        "is_preset": True,
+        "requires_node": True
     }
 }
 
@@ -48,8 +68,15 @@ PRESET_MCP_SERVERS = {
 class MCPServerConfig(BaseModel):
     """MCP 服务器配置"""
     name: str
-    server_url: str
+    transport: str = "http"  # http 或 stdio
+    # HTTP 类型字段
+    server_url: Optional[str] = None
     health_check_path: Optional[str] = "/health"
+    # STDIO 类型字段
+    command: Optional[str] = None  # 如 npx, node
+    args: Optional[List[str]] = []  # 如 ['-y', 'wttr-mcp-server@latest']
+    env: Optional[Dict[str, str]] = {}  # 环境变量
+    # 通用字段
     auth_type: Optional[str] = "none"  # none, api_key, oauth
     auth_config: Optional[Dict[str, str]] = None
     tools: List[str] = []
@@ -60,15 +87,18 @@ class MCPServerResponse(BaseModel):
     """MCP 服务器响应"""
     id: int
     name: str
+    preset_key: Optional[str] = None  # 预置服务器的唯一标识（用于 toggle API）
     server_url: Optional[str] = None  # HTTP 服务器 URL
     transport: str = "http"  # stdio 或 http
     command: Optional[str] = None  # stdio 命令
     args: Optional[List[str]] = None  # stdio 参数
+    env: Optional[Dict[str, str]] = None  # stdio 环境变量
     status: str  # enabled, disabled, error, running
     tools: List[str]
     is_preset: bool
     description: Optional[str] = None
     last_check: Optional[str] = None
+    health_check_path: Optional[str] = None  # HTTP 健康检查路径
 
 
 @router.get("", response_model=List[MCPServerResponse])
@@ -95,6 +125,7 @@ async def list_mcp_servers(db: AsyncSession = Depends(get_db)):
             response_list.append(MCPServerResponse(
                 id=existing.id,
                 name=preset["name"],
+                preset_key=key,  # 添加 preset_key 用于前端 toggle 调用
                 server_url=preset.get("server_url"),
                 transport=transport,
                 command=preset.get("command") if transport == "stdio" else None,
@@ -109,6 +140,7 @@ async def list_mcp_servers(db: AsyncSession = Depends(get_db)):
             response_list.append(MCPServerResponse(
                 id=preset_id_counter,
                 name=preset["name"],
+                preset_key=key,  # 添加 preset_key 用于前端 toggle 调用
                 server_url=preset.get("server_url"),
                 transport=transport,
                 command=preset.get("command") if transport == "stdio" else None,
@@ -124,16 +156,21 @@ async def list_mcp_servers(db: AsyncSession = Depends(get_db)):
     # 添加自定义服务器
     for server in servers:
         if not server.preset_key:
+            transport = server.transport or "http"
             response_list.append(MCPServerResponse(
                 id=server.id,
                 name=server.name,
-                server_url=server.server_url,
-                transport="http",  # 自定义服务器目前只支持 HTTP
+                server_url=server.server_url if transport == "http" else None,
+                transport=transport,
+                command=server.command if transport == "stdio" else None,
+                args=server.args if transport == "stdio" else None,
+                env=server.env if transport == "stdio" else None,
                 status=server.status,
                 tools=server.tools or [],
                 is_preset=False,
                 description=server.description,
-                last_check=server.last_check.isoformat() if server.last_check else None
+                last_check=server.last_check.isoformat() if server.last_check else None,
+                health_check_path=server.health_check_path if transport == "http" else None
             ))
     
     return response_list
@@ -261,17 +298,44 @@ async def add_mcp_config(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    通过代码编辑器方式添加 MCP 配置
+    通过表单/代码编辑器方式添加 MCP 配置
+    
+    支持 HTTP 和 STDIO 两种传输类型：
+    - HTTP: 需要 server_url
+    - STDIO: 需要 command 和 args
     
     对应需求: REQ-M6-008
     """
-    # REQ-M6-013: 检查是否重复
-    result = await db.execute(
-        select(MCPServer).where(
-            MCPServer.server_url == config.server_url,
-            MCPServer.preset_key == None
+    transport = config.transport or "http"
+    
+    # 验证必需字段
+    if transport == "http":
+        if not config.server_url:
+            raise HTTPException(status_code=400, detail="HTTP 类型需要提供 server_url")
+    elif transport == "stdio":
+        if not config.command:
+            raise HTTPException(status_code=400, detail="STDIO 类型需要提供 command")
+    else:
+        raise HTTPException(status_code=400, detail=f"不支持的传输类型: {transport}")
+    
+    # REQ-M6-013: 检查是否重复（根据类型使用不同的唯一标识）
+    if transport == "http":
+        result = await db.execute(
+            select(MCPServer).where(
+                MCPServer.server_url == config.server_url,
+                MCPServer.preset_key == None
+            )
         )
-    )
+    else:
+        # STDIO 类型：根据名称检查重复
+        result = await db.execute(
+            select(MCPServer).where(
+                MCPServer.name == config.name,
+                MCPServer.transport == "stdio",
+                MCPServer.preset_key == None
+            )
+        )
+    
     existing = result.scalar_one_or_none()
     
     if existing:
@@ -281,22 +345,31 @@ async def add_mcp_config(
             "existing_id": existing.id
         }
     
-    # REQ-M6-012: 连通性测试
-    connectivity_ok = await test_server_connectivity(
-        config.server_url,
-        config.health_check_path or "/health"
-    )
+    # 连通性测试（仅 HTTP 类型）
+    connectivity_ok = True
+    if transport == "http":
+        connectivity_ok = await test_server_connectivity(
+            config.server_url,
+            config.health_check_path or "/health"
+        )
     
     # 保存配置
     server = MCPServer(
         name=config.name,
-        server_url=config.server_url,
-        health_check_path=config.health_check_path or "/health",
+        transport=transport,
+        # HTTP 字段
+        server_url=config.server_url if transport == "http" else None,
+        health_check_path=config.health_check_path or "/health" if transport == "http" else None,
+        # STDIO 字段
+        command=config.command if transport == "stdio" else None,
+        args=config.args or [] if transport == "stdio" else None,
+        env=config.env or {} if transport == "stdio" else None,
+        # 通用字段
         tools=config.tools,
         auth_type=config.auth_type or "none",
         auth_config=config.auth_config,
         description=config.description,
-        status="enabled" if connectivity_ok else "error"
+        status="enabled" if connectivity_ok else ("disabled" if transport == "stdio" else "error")
     )
     db.add(server)
     await db.commit()
@@ -305,11 +378,15 @@ async def add_mcp_config(
     response = {
         "success": True,
         "id": server.id,
-        "connectivity": connectivity_ok
+        "transport": transport
     }
     
-    if not connectivity_ok:
-        response["warning"] = "服务器连接失败，配置已保存但可能无法正常使用"
+    if transport == "http":
+        response["connectivity"] = connectivity_ok
+        if not connectivity_ok:
+            response["warning"] = "服务器连接失败，配置已保存但可能无法正常使用"
+    else:
+        response["message"] = "STDIO 服务器配置已保存，请在列表中启动服务器"
     
     return response
 
@@ -350,29 +427,59 @@ async def update_mcp_server(
     if server.preset_key:
         raise HTTPException(status_code=400, detail="不能修改预制服务器配置")
     
+    transport = config.transport or server.transport or "http"
+    
+    # 验证必需字段
+    if transport == "http":
+        if not config.server_url:
+            raise HTTPException(status_code=400, detail="HTTP 类型需要提供 server_url")
+    elif transport == "stdio":
+        if not config.command:
+            raise HTTPException(status_code=400, detail="STDIO 类型需要提供 command")
+    
     # 更新字段
     server.name = config.name
-    server.server_url = config.server_url
-    server.health_check_path = config.health_check_path or "/health"
+    server.transport = transport
+    server.description = config.description
     server.tools = config.tools
     server.auth_type = config.auth_type or "none"
     server.auth_config = config.auth_config
-    server.description = config.description
     
-    # 重新测试连通性
-    connectivity_ok = await test_server_connectivity(
-        config.server_url,
-        config.health_check_path or "/health"
-    )
-    server.status = "enabled" if connectivity_ok else "error"
-    server.last_check = datetime.utcnow()
+    if transport == "http":
+        server.server_url = config.server_url
+        server.health_check_path = config.health_check_path or "/health"
+        server.command = None
+        server.args = None
+        server.env = None
+        
+        # 重新测试连通性
+        connectivity_ok = await test_server_connectivity(
+            config.server_url,
+            config.health_check_path or "/health"
+        )
+        server.status = "enabled" if connectivity_ok else "error"
+        server.last_check = datetime.utcnow()
+    else:
+        server.command = config.command
+        server.args = config.args or []
+        server.env = config.env or {}
+        server.server_url = None
+        server.health_check_path = None
+        # STDIO 服务器保持当前状态或设为 disabled
+        if server.status == "error":
+            server.status = "disabled"
     
     await db.commit()
     
-    return {
+    response = {
         "success": True,
-        "connectivity": connectivity_ok
+        "transport": transport
     }
+    
+    if transport == "http":
+        response["connectivity"] = connectivity_ok
+    
+    return response
 
 
 @router.delete("/{server_id}")

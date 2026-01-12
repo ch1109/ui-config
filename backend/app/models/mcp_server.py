@@ -30,16 +30,40 @@ class MCPServer(Base):
         Text,
         comment="服务器描述"
     )
+    # 传输类型：http 或 stdio
+    transport = Column(
+        String(20),
+        default="http",
+        comment="传输类型: http, stdio"
+    )
+    # HTTP 类型字段
     server_url = Column(
         String(500), 
-        nullable=False,
-        comment="服务器 URL"
+        nullable=True,  # 改为可空，因为 stdio 类型不需要
+        comment="服务器 URL（HTTP 类型）"
     )
     health_check_path = Column(
         String(100),
         default="/health",
-        comment="健康检查路径 (REQ-M6-015)"
+        comment="健康检查路径（HTTP 类型）"
     )
+    # STDIO 类型字段
+    command = Column(
+        String(200),
+        nullable=True,
+        comment="启动命令（STDIO 类型），如 npx, node"
+    )
+    args = Column(
+        JSON,
+        default=[],
+        comment="命令参数（STDIO 类型），如 ['-y', 'wttr-mcp-server@latest']"
+    )
+    env = Column(
+        JSON,
+        default={},
+        comment="环境变量（STDIO 类型），如 {'API_KEY': 'xxx'}"
+    )
+    # 通用字段
     auth_type = Column(
         String(20),
         default="none",
@@ -75,5 +99,5 @@ class MCPServer(Base):
     )
     
     def __repr__(self):
-        return f"<MCPServer(id={self.id}, name={self.name}, status={self.status})>"
+        return f"<MCPServer(id={self.id}, name={self.name}, transport={self.transport}, status={self.status})>"
 

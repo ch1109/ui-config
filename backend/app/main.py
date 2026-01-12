@@ -23,7 +23,13 @@ from app.core.exceptions import (
 from app.database import init_db, close_db
 
 # 导入路由
-from app.api.v1 import system_prompt, project, page_config, clarify, config_generator, mcp, mcp_test, mcp_context
+from app.api.v1 import system_prompt, project, page_config, clarify, config_generator, mcp, mcp_test, mcp_context, mcp_host
+
+# 导入 Host 相关服务
+from app.services.human_in_loop import human_in_loop_service
+from app.services.react_engine import react_engine
+from app.services.sse_mcp_client import sse_mcp_client
+from app.services.stdio_mcp_manager import stdio_mcp_manager
 
 # 配置日志
 logging.basicConfig(
@@ -47,9 +53,20 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("Database initialized")
     
+    # 启动 Human-in-the-Loop 服务
+    await human_in_loop_service.start()
+    logger.info("Human-in-the-Loop service started")
+    
     yield
     
     # 关闭时
+    # 清理 Host 相关服务
+    await human_in_loop_service.stop()
+    await react_engine.cleanup()
+    await sse_mcp_client.cleanup()
+    await stdio_mcp_manager.cleanup()
+    logger.info("MCP Host services cleaned up")
+    
     await close_db()
     logger.info("Application shutdown complete")
 
@@ -91,6 +108,7 @@ app.include_router(config_generator.router)
 app.include_router(mcp.router)
 app.include_router(mcp_test.router)
 app.include_router(mcp_context.router)
+app.include_router(mcp_host.router)  # MCP Host 完整功能
 
 
 @app.get("/")

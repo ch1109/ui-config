@@ -216,17 +216,23 @@
         </div>
         
         <div v-else class="server-grid">
-          <article v-for="server in customServers" :key="server.id" class="server-card custom">
+          <article v-for="server in customServers" :key="server.id" class="server-card custom" :class="{ running: isCustomServerRunning(server) }">
             <div class="card-header">
               <div class="server-info">
-                <div class="server-icon custom">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <div class="server-icon" :class="server.transport === 'stdio' ? 'stdio' : 'custom'">
+                  <svg v-if="server.transport === 'stdio'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="2" y="3" width="20" height="14" rx="2"/>
+                    <path d="M8 21h8M12 17v4"/>
+                    <path d="M7 8l3 3-3 3M12 14h5"/>
+                  </svg>
+                  <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
                   </svg>
                 </div>
                 <div class="server-details">
                   <h3>{{ server.name }}</h3>
-                  <span class="server-url">{{ server.server_url }}</span>
+                  <span v-if="server.transport === 'stdio'" class="server-transport">STDIO</span>
+                  <span v-else class="server-url">{{ server.server_url }}</span>
                 </div>
               </div>
               <div class="card-actions">
@@ -245,28 +251,79 @@
             </div>
             
             <div class="card-body">
+              <p v-if="server.description" class="server-desc">{{ server.description }}</p>
+              <div v-if="server.transport === 'stdio'" class="server-command">
+                <span class="command-label">命令:</span>
+                <code>{{ server.command }} {{ (server.args || []).join(' ') }}</code>
+              </div>
               <div class="server-tools" v-if="server.tools?.length">
                 <span class="tools-label">工具:</span>
                 <div class="tools-list">
-                  <span v-for="tool in server.tools" :key="tool" class="tool-tag">
+                  <span v-for="tool in server.tools.slice(0, 4)" :key="tool" class="tool-tag">
                     {{ tool }}
+                  </span>
+                  <span v-if="server.tools.length > 4" class="tool-tag more">
+                    +{{ server.tools.length - 4 }}
                   </span>
                 </div>
               </div>
             </div>
             
             <div class="card-footer">
-              <span :class="['status-badge', getStatusClass(server)]">
-                <span class="status-dot"></span>
-                {{ getStatusLabel(server) }}
-              </span>
-              <span v-if="server.last_check" class="last-check">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <circle cx="12" cy="12" r="10"/>
-                  <path d="M12 6v6l4 2"/>
-                </svg>
-                {{ formatTime(server.last_check) }}
-              </span>
+              <div class="footer-left">
+                <span :class="['status-badge', getCustomStatusClass(server)]">
+                  <span class="status-dot"></span>
+                  {{ getCustomStatusLabel(server) }}
+                </span>
+                <span v-if="server.last_check" class="last-check">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M12 6v6l4 2"/>
+                  </svg>
+                  {{ formatTime(server.last_check) }}
+                </span>
+              </div>
+              <div class="footer-actions">
+                <template v-if="server.transport === 'stdio'">
+                  <button 
+                    v-if="!isCustomServerRunning(server)" 
+                    class="action-btn start"
+                    @click="startCustomStdioServer(server)"
+                    :disabled="startingServer === getCustomServerKey(server)"
+                  >
+                    <span v-if="startingServer === getCustomServerKey(server)" class="spinner"></span>
+                    <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polygon points="5 3 19 12 5 21 5 3"/>
+                    </svg>
+                    启动
+                  </button>
+                  <template v-else>
+                    <button class="action-btn test" @click="openCustomTestPanel(server)">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+                      </svg>
+                      测试
+                    </button>
+                    <button 
+                      class="action-btn stop"
+                      @click="stopCustomStdioServer(server)"
+                      :disabled="stoppingServer === getCustomServerKey(server)"
+                    >
+                      <span v-if="stoppingServer === getCustomServerKey(server)" class="spinner small"></span>
+                      <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="6" y="6" width="12" height="12"/>
+                      </svg>
+                    </button>
+                  </template>
+                </template>
+                <button v-else class="action-btn test" @click="testConnection(server)">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                    <polyline points="22 4 12 14.01 9 11.01"/>
+                  </svg>
+                  测试
+                </button>
+              </div>
             </div>
           </article>
         </div>
@@ -392,21 +449,77 @@
       <a-tabs v-model:activeKey="activeTab" class="modal-tabs">
         <a-tab-pane key="form" tab="表单配置">
           <div class="form-section">
+            <!-- 传输类型选择 -->
+            <div class="form-group">
+              <label>传输类型 <span class="required">*</span></label>
+              <div class="transport-selector">
+                <label class="transport-option" :class="{ active: formData.transport === 'http' }">
+                  <input type="radio" v-model="formData.transport" value="http" />
+                  <div class="option-content">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <circle cx="12" cy="12" r="10"/>
+                      <line x1="2" y1="12" x2="22" y2="12"/>
+                      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                    </svg>
+                    <span>HTTP/SSE</span>
+                    <small>远程服务器</small>
+                  </div>
+                </label>
+                <label class="transport-option" :class="{ active: formData.transport === 'stdio' }">
+                  <input type="radio" v-model="formData.transport" value="stdio" />
+                  <div class="option-content">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="2" y="3" width="20" height="14" rx="2"/>
+                      <path d="M8 21h8M12 17v4"/>
+                      <path d="M7 8l3 3-3 3M12 14h5"/>
+                    </svg>
+                    <span>STDIO</span>
+                    <small>本地进程</small>
+                  </div>
+                </label>
+              </div>
+            </div>
+            
             <div class="form-group">
               <label>服务器名称 <span class="required">*</span></label>
               <input v-model="formData.name" type="text" class="form-input" placeholder="My MCP Server" />
             </div>
-            <div class="form-group">
-              <label>服务器 URL <span class="required">*</span></label>
-              <input v-model="formData.server_url" type="text" class="form-input" placeholder="https://mcp.example.com" />
-            </div>
-            <div class="form-group">
-              <label>健康检查路径</label>
-              <input v-model="formData.health_check_path" type="text" class="form-input" placeholder="/health" />
-            </div>
+            
+            <!-- HTTP 类型字段 -->
+            <template v-if="formData.transport === 'http'">
+              <div class="form-group">
+                <label>服务器 URL <span class="required">*</span></label>
+                <input v-model="formData.server_url" type="text" class="form-input" placeholder="https://mcp.example.com" />
+              </div>
+              <div class="form-group">
+                <label>健康检查路径</label>
+                <input v-model="formData.health_check_path" type="text" class="form-input" placeholder="/health" />
+              </div>
+            </template>
+            
+            <!-- STDIO 类型字段 -->
+            <template v-else>
+              <div class="form-group">
+                <label>启动命令 <span class="required">*</span></label>
+                <input v-model="formData.command" type="text" class="form-input" placeholder="npx" />
+                <p class="form-hint">常用命令：npx, node, python, uvx</p>
+              </div>
+              <div class="form-group">
+                <label>命令参数</label>
+                <input v-model="argsInput" type="text" class="form-input" placeholder="-y wttr-mcp-server@latest" />
+                <p class="form-hint">空格分隔，例如：-y wttr-mcp-server@latest</p>
+              </div>
+              <div class="form-group">
+                <label>环境变量</label>
+                <textarea v-model="envInput" class="form-textarea" rows="3" placeholder="API_KEY=your_key&#10;OTHER_VAR=value"></textarea>
+                <p class="form-hint">每行一个，格式：KEY=VALUE</p>
+              </div>
+            </template>
+            
             <div class="form-group">
               <label>工具列表 (逗号分隔)</label>
               <input v-model="toolsInput" type="text" class="form-input" placeholder="search, retrieve, store" />
+              <p class="form-hint">可选，服务器启动后会自动获取</p>
             </div>
             <div class="form-group">
               <label>描述</label>
@@ -485,11 +598,20 @@ const toolResult = ref(null)
 
 const formData = ref({
   name: '',
+  transport: 'http',  // 'http' 或 'stdio'
+  // HTTP 字段
   server_url: '',
   health_check_path: '/health',
+  // STDIO 字段
+  command: 'npx',
+  args: [],
+  env: {},
+  // 通用字段
   description: '',
   tools: []
 })
+const argsInput = ref('')  // 用于输入 args（空格分隔）
+const envInput = ref('')   // 用于输入 env（KEY=VALUE 格式，每行一个）
 const toolsInput = ref('')
 const jsonInput = ref('')
 
@@ -539,9 +661,20 @@ const getServerKey = (server) => {
   return `custom_${server.id}`
 }
 
+const getCustomServerKey = (server) => {
+  return `custom_${server.id}`
+}
+
 const isServerRunning = (server) => {
   if (server.transport !== 'stdio') return false
-  const key = server.name === 'Context7' ? 'context7' : 'everything'
+  const key = server.name === 'Context7' ? 'context7' : (server.name === 'Everything Server' ? 'everything' : (server.name === '和风天气' ? 'hefeng' : null))
+  if (!key) return false
+  return stdioStatus.value[key]?.running || false
+}
+
+const isCustomServerRunning = (server) => {
+  if (server.transport !== 'stdio') return false
+  const key = getCustomServerKey(server)
   return stdioStatus.value[key]?.running || false
 }
 
@@ -562,6 +695,31 @@ const getStatusLabel = (server) => {
   return map[server.status] || server.status
 }
 
+const getCustomStatusClass = (server) => {
+  if (isCustomServerRunning(server)) return 'running'
+  if (server.status === 'enabled') return 'success'
+  if (server.status === 'error') return 'error'
+  return 'warning'
+}
+
+const getCustomStatusLabel = (server) => {
+  if (isCustomServerRunning(server)) return '运行中'
+  if (server.transport === 'stdio') {
+    const map = {
+      enabled: '已配置',
+      disabled: '未启动',
+      error: '启动失败'
+    }
+    return map[server.status] || server.status
+  }
+  const map = {
+    enabled: '已启用',
+    disabled: '已禁用',
+    error: '连接失败'
+  }
+  return map[server.status] || server.status
+}
+
 const formatTime = (time) => {
   return new Date(time).toLocaleString('zh-CN')
 }
@@ -569,7 +727,12 @@ const formatTime = (time) => {
 // Server operations
 const toggleServer = async (server) => {
   try {
-    const key = server.name === 'Context7' ? 'context7' : (server.name === 'Everything Server' ? 'everything' : server.preset_key)
+    // 使用后端返回的 preset_key，预置服务器都会有这个字段
+    const key = server.preset_key
+    if (!key) {
+      message.error('无法识别服务器标识')
+      return
+    }
     const enable = server.status !== 'enabled'
     await mcpApi.toggle(key, enable)
     server.status = enable ? 'enabled' : 'disabled'
@@ -582,7 +745,7 @@ const toggleServer = async (server) => {
 }
 
 const startStdioServer = async (server) => {
-  const key = server.name === 'Context7' ? 'context7' : 'everything'
+  const key = server.name === 'Context7' ? 'context7' : (server.name === 'Everything Server' ? 'everything' : 'hefeng')
   startingServer.value = key
   
   try {
@@ -602,7 +765,7 @@ const startStdioServer = async (server) => {
 }
 
 const stopStdioServer = async (server) => {
-  const key = server.name === 'Context7' ? 'context7' : 'everything'
+  const key = server.name === 'Context7' ? 'context7' : (server.name === 'Everything Server' ? 'everything' : 'hefeng')
   stoppingServer.value = key
   
   try {
@@ -618,6 +781,66 @@ const stopStdioServer = async (server) => {
     message.error('停止失败: ' + error.message)
   } finally {
     stoppingServer.value = null
+  }
+}
+
+// 自定义 STDIO 服务器操作
+const startCustomStdioServer = async (server) => {
+  const key = getCustomServerKey(server)
+  startingServer.value = key
+  
+  try {
+    const res = await mcpTestApi.startStdioServer(key)
+    if (res.success) {
+      message.success(`${server.name} 启动成功！`)
+      await Promise.all([loadStdioStatus(), loadMcpContext()])
+    } else {
+      message.error('启动失败: ' + (res.message || '未知错误'))
+    }
+  } catch (error) {
+    const errorMsg = error.response?.data?.detail || error.message
+    message.error('启动失败: ' + errorMsg)
+  } finally {
+    startingServer.value = null
+  }
+}
+
+const stopCustomStdioServer = async (server) => {
+  const key = getCustomServerKey(server)
+  stoppingServer.value = key
+  
+  try {
+    const res = await mcpTestApi.stopStdioServer(key)
+    if (res.success) {
+      message.success('服务器已停止')
+      if (testingServer.value?.id === server.id) {
+        testingServer.value = null
+      }
+      await Promise.all([loadStdioStatus(), loadMcpContext()])
+    }
+  } catch (error) {
+    message.error('停止失败: ' + error.message)
+  } finally {
+    stoppingServer.value = null
+  }
+}
+
+const openCustomTestPanel = async (server) => {
+  testingServer.value = server
+  selectedTool.value = null
+  toolResult.value = null
+  Object.keys(toolArgs).forEach(key => delete toolArgs[key])
+  
+  loadingTools.value = true
+  try {
+    const key = getCustomServerKey(server)
+    const res = await mcpTestApi.getStdioTools(key)
+    availableTools.value = res.tools || []
+  } catch (error) {
+    message.error('加载工具列表失败: ' + error.message)
+    availableTools.value = []
+  } finally {
+    loadingTools.value = false
   }
 }
 
@@ -646,7 +869,7 @@ const openTestPanel = async (server) => {
   
   loadingTools.value = true
   try {
-    const key = server.name === 'Context7' ? 'context7' : 'everything'
+    const key = server.name === 'Context7' ? 'context7' : (server.name === 'Everything Server' ? 'everything' : 'hefeng')
     const res = await mcpTestApi.getStdioTools(key)
     availableTools.value = res.tools || []
   } catch (error) {
@@ -678,7 +901,14 @@ const callTool = async () => {
   toolResult.value = null
   
   try {
-    const key = testingServer.value.name === 'Context7' ? 'context7' : 'everything'
+    // 判断是预置服务器还是自定义服务器
+    let key
+    if (testingServer.value.is_preset) {
+      key = testingServer.value.name === 'Context7' ? 'context7' : (testingServer.value.name === 'Everything Server' ? 'everything' : 'hefeng')
+    } else {
+      key = getCustomServerKey(testingServer.value)
+    }
+    
     const res = await mcpTestApi.callStdioTool(key, selectedTool.value.name, { ...toolArgs })
     toolResult.value = res
     
@@ -721,14 +951,21 @@ const copyPromptSnippet = async () => {
 // Custom server CRUD
 const editServer = (server) => {
   editingServer.value = server
+  const transport = server.transport || 'http'
   formData.value = {
     name: server.name,
-    server_url: server.server_url,
+    transport: transport,
+    server_url: server.server_url || '',
     health_check_path: server.health_check_path || '/health',
+    command: server.command || 'npx',
+    args: server.args || [],
+    env: server.env || {},
     description: server.description || '',
     tools: server.tools || []
   }
   toolsInput.value = server.tools?.join(', ') || ''
+  argsInput.value = (server.args || []).join(' ')
+  envInput.value = Object.entries(server.env || {}).map(([k, v]) => `${k}=${v}`).join('\n')
   showAddDialog.value = true
 }
 
@@ -799,11 +1036,17 @@ const closeDialog = () => {
   editingServer.value = null
   formData.value = {
     name: '',
+    transport: 'http',
     server_url: '',
     health_check_path: '/health',
+    command: 'npx',
+    args: [],
+    env: {},
     description: '',
     tools: []
   }
+  argsInput.value = ''
+  envInput.value = ''
   toolsInput.value = ''
   jsonInput.value = ''
   jsonError.value = ''
@@ -816,33 +1059,95 @@ const saveServer = async () => {
       const data = JSON.parse(jsonInput.value)
       formData.value = {
         name: data.name || '',
+        transport: data.transport || 'http',
         server_url: data.server_url || '',
         health_check_path: data.health_check_path || '/health',
+        command: data.command || 'npx',
+        args: data.args || [],
+        env: data.env || {},
         description: data.description || '',
         tools: data.tools || []
       }
+      // 同步输入框
+      argsInput.value = (data.args || []).join(' ')
+      envInput.value = Object.entries(data.env || {}).map(([k, v]) => `${k}=${v}`).join('\n')
     } catch {
       jsonError.value = '无效的 JSON 格式'
       return
     }
   }
   
+  // 处理工具列表
   if (toolsInput.value) {
     formData.value.tools = toolsInput.value.split(',').map(t => t.trim()).filter(Boolean)
   }
   
-  if (!formData.value.name || !formData.value.server_url) {
-    message.warning('请填写必填字段')
+  // 处理 STDIO 参数
+  if (formData.value.transport === 'stdio') {
+    // 解析 args
+    if (argsInput.value.trim()) {
+      // 简单分割，支持引号包裹的参数
+      formData.value.args = argsInput.value.trim().split(/\s+/)
+    } else {
+      formData.value.args = []
+    }
+    
+    // 解析 env
+    const envObj = {}
+    if (envInput.value.trim()) {
+      envInput.value.split('\n').forEach(line => {
+        const trimmed = line.trim()
+        if (trimmed && trimmed.includes('=')) {
+          const idx = trimmed.indexOf('=')
+          const key = trimmed.substring(0, idx).trim()
+          const value = trimmed.substring(idx + 1).trim()
+          if (key) {
+            envObj[key] = value
+          }
+        }
+      })
+    }
+    formData.value.env = envObj
+  }
+  
+  // 验证必填字段
+  if (!formData.value.name) {
+    message.warning('请填写服务器名称')
+    return
+  }
+  
+  if (formData.value.transport === 'http' && !formData.value.server_url) {
+    message.warning('HTTP 类型需要填写服务器 URL')
+    return
+  }
+  
+  if (formData.value.transport === 'stdio' && !formData.value.command) {
+    message.warning('STDIO 类型需要填写启动命令')
     return
   }
   
   isSaving.value = true
   
   try {
-    if (editingServer.value) {
-      await mcpApi.update(editingServer.value.id, formData.value)
+    const configToSave = { ...formData.value }
+    
+    // 根据类型清理不需要的字段
+    if (configToSave.transport === 'http') {
+      delete configToSave.command
+      delete configToSave.args
+      delete configToSave.env
     } else {
-      await mcpApi.addConfig(formData.value)
+      delete configToSave.server_url
+      delete configToSave.health_check_path
+    }
+    
+    if (editingServer.value) {
+      await mcpApi.update(editingServer.value.id, configToSave)
+    } else {
+      const result = await mcpApi.addConfig(configToSave)
+      if (result.transport === 'stdio') {
+        message.success('STDIO 服务器已添加，可在列表中启动')
+      }
     }
     
     servers.value = await mcpApi.list()
@@ -850,7 +1155,7 @@ const saveServer = async () => {
     message.success('保存成功')
     await loadMcpContext()
   } catch (error) {
-    message.error('保存失败: ' + (error.response?.data?.message || error.message))
+    message.error('保存失败: ' + (error.response?.data?.detail || error.response?.data?.message || error.message))
   } finally {
     isSaving.value = false
   }
@@ -1834,6 +2139,102 @@ const saveServer = async () => {
   :deep(.ant-tabs-nav) {
     margin-bottom: 20px;
   }
+}
+
+// Transport selector
+.transport-selector {
+  display: flex;
+  gap: 12px;
+  
+  .transport-option {
+    flex: 1;
+    position: relative;
+    cursor: pointer;
+    
+    input {
+      position: absolute;
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    
+    .option-content {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      padding: 16px 12px;
+      background: var(--bg-subtle);
+      border: 2px solid var(--border-color);
+      border-radius: 12px;
+      transition: all 0.2s;
+      
+      svg {
+        width: 28px;
+        height: 28px;
+        color: var(--text-muted);
+      }
+      
+      span {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-secondary);
+      }
+      
+      small {
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+    }
+    
+    &:hover .option-content {
+      border-color: rgba(99, 102, 241, 0.3);
+    }
+    
+    &.active .option-content {
+      background: var(--primary-light);
+      border-color: var(--primary);
+      
+      svg {
+        color: var(--primary);
+      }
+      
+      span {
+        color: var(--primary);
+      }
+    }
+  }
+}
+
+.form-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 6px 0 0 0;
+}
+
+.server-command {
+  margin-bottom: 12px;
+  
+  .command-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-right: 8px;
+  }
+  
+  code {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 4px 8px;
+    background: var(--bg-subtle);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    word-break: break-all;
+  }
+}
+
+.server-icon.stdio {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(16, 185, 129, 0.2) 100%);
+  color: var(--success);
 }
 
 .form-section {

@@ -809,9 +809,9 @@ a {
 }
 
 // ============================================
-// 侧边栏组件样式
+// 侧边栏组件样式 (仅适用于 App.vue 中的全局侧边栏)
 // ============================================
-.sidebar {
+.app-layout > .ant-layout-sider.sidebar {
   background: var(--sidebar-bg) !important;
   box-shadow: 4px 0 24px rgba(0, 0, 0, 0.15);
   

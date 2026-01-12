@@ -179,12 +179,21 @@ class StdioMCPManager:
         session.process.stdin.write(request_str.encode())
         await session.process.stdin.drain()
         
-        # 读取响应
-        response_line = await session.process.stdout.readline()
-        if not response_line:
-            raise Exception("MCP 服务器已关闭连接")
-        
-        response = json.loads(response_line.decode())
+        # 读取响应，忽略非 JSON 输出（部分 MCP 服务器会在 stdout 输出日志）
+        while True:
+            response_line = await session.process.stdout.readline()
+            if not response_line:
+                raise Exception("MCP 服务器已关闭连接")
+            try:
+                response = json.loads(response_line.decode())
+                break
+            except json.JSONDecodeError:
+                logger.warning(
+                    "Non-JSON output from MCP server %s: %s",
+                    session.server_key,
+                    response_line.decode(errors="replace").strip()
+                )
+                continue
         
         if "error" in response:
             error = response["error"]
@@ -342,4 +351,3 @@ class StdioMCPManager:
 
 # 创建全局单例
 stdio_mcp_manager = StdioMCPManager()
-

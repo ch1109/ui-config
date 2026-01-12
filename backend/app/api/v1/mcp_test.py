@@ -481,28 +481,57 @@ async def get_stdio_servers_status():
 
 
 @router.post("/stdio/start")
-async def start_stdio_server(request: StdioServerRequest):
+async def start_stdio_server(request: StdioServerRequest, db: AsyncSession = Depends(get_db)):
     """
     启动 stdio MCP 服务器
     
-    支持的服务器:
-    - context7: Context7 官方文档搜索服务器
-    - everything: MCP 官方测试服务器
+    支持预置服务器和自定义服务器:
+    - 预置: context7, everything, wttr
+    - 自定义: custom_{server_id}
     """
     server_key = request.server_key
     
-    if server_key not in PRESET_MCP_SERVERS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"未知的服务器: {server_key}，可用选项: {list(PRESET_MCP_SERVERS.keys())}"
+    # 判断是预置服务器还是自定义服务器
+    if server_key in PRESET_MCP_SERVERS:
+        preset = PRESET_MCP_SERVERS[server_key]
+        
+        if preset.get("transport") != "stdio":
+            raise HTTPException(
+                status_code=400,
+                detail=f"服务器 {server_key} 不是 stdio 类型"
+            )
+        
+        command = preset["command"]
+        args = preset.get("args", [])
+        env = preset.get("env", {})
+    elif server_key.startswith("custom_"):
+        # 自定义服务器
+        try:
+            server_id = int(server_key.replace("custom_", ""))
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"无效的服务器标识: {server_key}")
+        
+        result = await db.execute(
+            select(MCPServer).where(MCPServer.id == server_id)
         )
-    
-    preset = PRESET_MCP_SERVERS[server_key]
-    
-    if preset.get("transport") != "stdio":
+        server = result.scalar_one_or_none()
+        
+        if not server:
+            raise HTTPException(status_code=404, detail="服务器不存在")
+        
+        if server.transport != "stdio":
+            raise HTTPException(status_code=400, detail="该服务器不是 STDIO 类型")
+        
+        if not server.command:
+            raise HTTPException(status_code=400, detail="服务器未配置启动命令")
+        
+        command = server.command
+        args = server.args or []
+        env = server.env or {}
+    else:
         raise HTTPException(
             status_code=400,
-            detail=f"服务器 {server_key} 不是 stdio 类型"
+            detail=f"未知的服务器: {server_key}，可用预置选项: {list(PRESET_MCP_SERVERS.keys())}，或使用 custom_{{id}} 格式"
         )
     
     # 检查是否已在运行
@@ -520,8 +549,9 @@ async def start_stdio_server(request: StdioServerRequest):
     # 启动服务器
     success, message = await stdio_mcp_manager.start_server(
         server_key=server_key,
-        command=preset["command"],
-        args=preset.get("args", []),
+        command=command,
+        args=args,
+        env=env,
         timeout=60.0  # 给 npx 更多时间下载包
     )
     

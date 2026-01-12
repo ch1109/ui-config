@@ -3,7 +3,7 @@ import axios from 'axios'
 // 创建 axios 实例
 const api = axios.create({
   baseURL: '/api/v1',
-  timeout: 30000,
+  timeout: 120000,  // 增加到 120 秒以适应 npx 下载包
 })
 
 function sleep(ms) {
@@ -341,6 +341,9 @@ export const mcpApi = {
       return api.post('/mcp/upload', formData)
     }
   },
+  // 添加配置（支持 HTTP 和 STDIO 两种类型）
+  // HTTP: { name, transport: 'http', server_url, health_check_path, ... }
+  // STDIO: { name, transport: 'stdio', command, args, env, ... }
   addConfig: (config) => api.post('/mcp/config', config),
   update: (serverId, config) => api.put(`/mcp/${serverId}`, config),
   delete: (serverId) => api.delete(`/mcp/${serverId}`),
@@ -361,6 +364,201 @@ export const mcpContextApi = {
   
   // 获取已启用的服务器列表
   getServers: () => api.get('/mcp-context/servers')
+}
+
+// MCP Host API - 完整的 Host 功能
+export const mcpHostApi = {
+  // ========== 会话管理 ==========
+  createSession: (systemPrompt = '') => api.post('/host/sessions', { system_prompt: systemPrompt }),
+  getSession: (sessionId) => api.get(`/host/sessions/${sessionId}`),
+  deleteSession: (sessionId) => api.delete(`/host/sessions/${sessionId}`),
+  
+  // ========== 对话（ReAct 循环）==========
+  // 流式对话
+  chatStream: (sessionId, message, config, onEvent, onComplete, onError) => {
+    const controller = new AbortController()
+    
+    fetch(`/api/v1/host/sessions/${sessionId}/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'text/event-stream'
+      },
+      body: JSON.stringify({
+        message,
+        llm_provider: config.provider || 'openai',
+        llm_model: config.model || 'gpt-4o',
+        api_key: config.apiKey,
+        base_url: config.baseUrl,
+        temperature: config.temperature || 0.7,
+        max_tokens: config.maxTokens || 4096,
+        max_iterations: config.maxIterations || 10,
+        stream: true
+      }),
+      signal: controller.signal
+    }).then(async response => {
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+      
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const dataStr = line.substring(6).trim()
+            if (dataStr === '[DONE]') {
+              onComplete && onComplete()
+              return
+            }
+            if (!dataStr) continue
+            
+            try {
+              const event = JSON.parse(dataStr)
+              onEvent && onEvent(event)
+              
+              // 如果需要确认，暂停
+              if (event.type === 'confirmation_required') {
+                return
+              }
+            } catch (e) {
+              console.debug('Parse error:', dataStr)
+            }
+          }
+        }
+      }
+    }).catch(error => {
+      if (error.name !== 'AbortError') {
+        console.error('Chat stream error:', error)
+        onError && onError(error.message || '连接失败')
+      }
+    })
+    
+    return { close: () => controller.abort() }
+  },
+  
+  // 非流式对话
+  chat: (sessionId, message, config) => api.post(`/host/sessions/${sessionId}/chat`, {
+    message,
+    llm_provider: config.provider || 'openai',
+    llm_model: config.model || 'gpt-4o',
+    api_key: config.apiKey,
+    base_url: config.baseUrl,
+    temperature: config.temperature || 0.7,
+    max_tokens: config.maxTokens || 4096,
+    stream: false
+  }),
+  
+  // ========== 人机回环确认 ==========
+  getPendingConfirmations: (sessionId) => api.get(`/host/sessions/${sessionId}/confirmations`),
+  confirmToolCall: (sessionId, requestId, approved, modifiedArgs = null, reason = '') => 
+    api.post(`/host/sessions/${sessionId}/confirmations/${requestId}`, {
+      approved,
+      modified_arguments: modifiedArgs,
+      reason
+    }),
+  
+  // 确认并继续 ReAct 循环（流式）
+  confirmAndContinueStream: (sessionId, requestId, approved, modifiedArgs, config, onEvent, onComplete, onError) => {
+    const controller = new AbortController()
+    
+    fetch(`/api/v1/host/sessions/${sessionId}/confirmations/${requestId}/continue`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'text/event-stream'
+      },
+      body: JSON.stringify({
+        approved,
+        modified_arguments: modifiedArgs,
+        llm_provider: config?.provider || 'openai',
+        llm_model: config?.model || 'gpt-4o',
+        api_key: config?.apiKey,
+        base_url: config?.baseUrl,
+        temperature: config?.temperature || 0.7,
+        max_tokens: config?.maxTokens || 4096,
+        stream: true
+      }),
+      signal: controller.signal
+    }).then(async response => {
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+      
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const dataStr = line.substring(6).trim()
+            if (dataStr === '[DONE]') {
+              onComplete && onComplete()
+              return
+            }
+            if (!dataStr) continue
+            
+            try {
+              const event = JSON.parse(dataStr)
+              onEvent && onEvent(event)
+            } catch (e) {
+              console.debug('Parse error:', dataStr)
+            }
+          }
+        }
+      }
+    }).catch(error => {
+      if (error.name !== 'AbortError') {
+        onError && onError(error.message || '连接失败')
+      }
+    })
+    
+    return { close: () => controller.abort() }
+  },
+  
+  // ========== 工具管理 ==========
+  listTools: () => api.get('/host/tools'),
+  callTool: (serverKey, toolName, args, skipConfirmation = false) => 
+    api.post('/host/tools/call', {
+      server_key: serverKey,
+      tool_name: toolName,
+      arguments: args,
+      skip_confirmation: skipConfirmation
+    }),
+  
+  // ========== 服务器管理 ==========
+  listServers: () => api.get('/host/servers'),
+  startStdioServer: (serverKey, command, args = [], env = {}) => 
+    api.post(`/host/servers/stdio/${serverKey}/start`, null, { 
+      params: { command, args: args.join(','), ...env } 
+    }),
+  stopStdioServer: (serverKey) => api.post(`/host/servers/stdio/${serverKey}/stop`),
+  connectSseServer: (config) => api.post('/host/servers/sse/connect', config),
+  disconnectSseServer: (serverKey) => api.post(`/host/servers/sse/${serverKey}/disconnect`),
+  
+  // ========== 风险策略 ==========
+  getPolicy: () => api.get('/host/policy'),
+  updatePolicy: (policy) => api.put('/host/policy', null, { params: policy }),
+  
+  // ========== 审计日志 ==========
+  getAuditLog: (sessionId = null, limit = 100) => 
+    api.get('/host/audit-log', { params: { session_id: sessionId, limit } }),
+  
+  // ========== 健康检查 ==========
+  health: () => api.get('/host/health')
 }
 
 // MCP Test API - 用于测试 MCP 功能

@@ -30,6 +30,12 @@ const routes = [
     name: 'MCPManager',
     component: () => import('@/views/MCPManager.vue'),
     meta: { title: 'MCP 服务器管理' }
+  },
+  {
+    path: '/mcp-host',
+    name: 'MCPHost',
+    component: () => import('@/views/MCPHostPage.vue'),
+    meta: { title: 'MCP Host 对话' }
   }
   // 已合并到 MCPManager.vue:
   // - /mcp-test (MCP 功能测试)
