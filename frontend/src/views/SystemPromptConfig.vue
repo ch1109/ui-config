@@ -144,60 +144,6 @@
           </div>
         </div>
         
-        <!-- Tips Sidebar -->
-        <aside class="tips-section">
-          <div class="panel-card tips-card">
-            <div class="card-header">
-              <h3>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
-                </svg>
-                编写提示
-              </h3>
-            </div>
-            <div class="card-body">
-              <ul class="tips-list">
-                <li v-for="(tip, index) in tipsList" :key="index" class="tip-item">
-                  <span class="tip-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                      <path d="M20 6L9 17l-5-5"/>
-                    </svg>
-                  </span>
-                  <span class="tip-text">{{ tip }}</span>
-                </li>
-              </ul>
-            </div>
-          </div>
-          
-          <!-- Quick Templates -->
-          <div class="panel-card templates-card">
-            <div class="card-header">
-              <h3>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <rect x="3" y="3" width="18" height="18" rx="2"/>
-                  <path d="M3 9h18M9 21V9"/>
-                </svg>
-                快速模板
-              </h3>
-            </div>
-            <div class="card-body">
-              <div class="template-items">
-                <button class="template-btn">
-                  <span class="template-icon">📄</span>
-                  <span class="template-name">基础模板</span>
-                </button>
-                <button class="template-btn">
-                  <span class="template-icon">🎯</span>
-                  <span class="template-name">精准识别</span>
-                </button>
-                <button class="template-btn">
-                  <span class="template-icon">🔍</span>
-                  <span class="template-name">详细分析</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </aside>
       </div>
     </div>
   </div>
@@ -237,13 +183,6 @@ const availableModels = ref([
     provider: '阿里云 / 本地部署'
   }
 ])
-
-const tipsList = [
-  '明确描述期望的输出格式（JSON Schema）',
-  '列出需要识别的元素类型和命名规则',
-  '说明何时需要提出澄清问题',
-  '定义置信度的评估标准'
-]
 
 // 计算属性
 const charCount = computed(() => promptContent.value.length)
@@ -454,7 +393,7 @@ onBeforeUnmount(() => {
 
 .content-grid {
   display: grid;
-  grid-template-columns: 1fr 360px;
+  grid-template-columns: 1fr;
   gap: 24px;
   max-width: 1600px;
 }
@@ -672,91 +611,6 @@ onBeforeUnmount(() => {
   }
 }
 
-.tips-section {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.tips-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.tip-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 12px;
-  background: var(--bg-subtle);
-  border-radius: 10px;
-  
-  .tip-icon {
-    width: 20px;
-    height: 20px;
-    background: var(--success-light);
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    
-    svg {
-      width: 12px;
-      height: 12px;
-      color: var(--success);
-    }
-  }
-  
-  .tip-text {
-    font-size: 13px;
-    color: var(--text-secondary);
-    line-height: 1.5;
-  }
-}
-
-.template-items {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.template-btn {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  padding: 12px 16px;
-  background: var(--bg-subtle);
-  border: 1px solid transparent;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: all 0.2s;
-  
-  .template-icon {
-    font-size: 18px;
-  }
-  
-  .template-name {
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--text-secondary);
-  }
-  
-  &:hover {
-    background: var(--bg-elevated);
-    border-color: var(--primary);
-    
-    .template-name {
-      color: var(--primary);
-    }
-  }
-}
-
 // 模型选择卡片样式
 .model-card {
   margin-bottom: 20px;
@@ -875,15 +729,6 @@ onBeforeUnmount(() => {
   .content-grid {
     grid-template-columns: 1fr;
   }
-  
-  .tips-section {
-    flex-direction: row;
-    
-    .panel-card {
-      flex: 1;
-    }
-  }
-  
   .model-options {
     flex-direction: column;
   }

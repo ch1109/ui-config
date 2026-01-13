@@ -8,7 +8,7 @@
             <path d="M12 2a2 2 0 012 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 017 7h1a1 1 0 110 2h-1.07A7 7 0 0113 23a7 7 0 01-7.07-7H5a1 1 0 110-2h1a7 7 0 017-7h1V5.73A2 2 0 0112 2z"/>
           </svg>
         </div>
-        <span class="name">AI 助手</span>
+        <span class="name">UI config 填写助手</span>
       </div>
       <span v-if="status" :class="['status-badge', status]">
         <span class="status-dot"></span>

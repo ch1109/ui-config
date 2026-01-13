@@ -283,6 +283,7 @@ const handleRemove = () => {
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
+  position: relative;
   
   svg {
     width: 16px;
@@ -310,6 +311,7 @@ const handleRemove = () => {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  position: relative;
   
   .upload-icon {
     width: 64px;
@@ -351,13 +353,12 @@ const handleRemove = () => {
 
 .hidden-input {
   position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  margin: 0;
   border: 0;
 }
 

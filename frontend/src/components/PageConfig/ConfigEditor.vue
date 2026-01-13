@@ -132,7 +132,6 @@ AI 在此页面应遵循的约束...
       <div class="form-field">
         <label>
           可点击按钮
-          <span class="required">*</span>
         </label>
         <div class="list-editor">
           <div 
