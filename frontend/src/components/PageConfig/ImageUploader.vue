@@ -419,16 +419,13 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 16px;
-  padding: 20px;
+  justify-content: space-between;
+  padding: 24px;
 }
 
 .upload-placeholder {
   text-align: center;
-  padding: 32px;
   width: 100%;
-  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -437,11 +434,11 @@ onUnmounted(() => {
   position: relative;
 
   .upload-icon {
-    width: 64px;
-    height: 64px;
-    margin: 0 auto 20px;
+    width: 56px;
+    height: 56px;
+    margin: 0 auto 16px;
     background: var(--bg-elevated);
-    border-radius: 16px;
+    border-radius: 14px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -449,23 +446,23 @@ onUnmounted(() => {
     box-shadow: var(--shadow-sm);
 
     svg {
-      width: 32px;
-      height: 32px;
+      width: 28px;
+      height: 28px;
       color: var(--primary);
     }
   }
 
   .upload-text {
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 600;
     color: var(--text-heading);
     margin-bottom: 4px;
   }
 
   .upload-hint {
-    font-size: 13px;
+    font-size: 12px;
     color: var(--text-secondary);
-    margin-bottom: 12px;
+    margin-bottom: 8px;
   }
 
   .upload-formats {
@@ -479,42 +476,47 @@ onUnmounted(() => {
   display: flex;
   justify-content: center;
   gap: 12px;
+  margin-top: 8px;
 }
 
 .paste-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-  padding: 10px 20px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--primary);
-  background: var(--bg-elevated);
-  border: 1.5px solid var(--primary);
-  border-radius: 10px;
+  padding: 12px 28px;
+  font-size: 14px;
+  font-weight: 600;
+  color: white;
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  border: none;
+  border-radius: 12px;
   cursor: pointer;
-  transition: all 0.2s;
-  box-shadow: var(--shadow-sm);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
+  white-space: nowrap;
 
   svg {
     width: 18px;
     height: 18px;
+    flex-shrink: 0;
   }
 
   &:hover:not(:disabled) {
-    background: var(--primary);
-    color: white;
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25);
+    transform: translateY(-3px);
+    box-shadow: 0 8px 24px rgba(99, 102, 241, 0.45);
+    background: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%);
   }
 
   &:active:not(:disabled) {
-    transform: translateY(0);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
   }
 
   &:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+    transform: none;
   }
 }
 
