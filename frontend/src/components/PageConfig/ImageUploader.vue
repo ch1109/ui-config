@@ -208,16 +208,17 @@ const handleRemove = () => {
   emit('update:modelValue', null)
 }
 
-// 从剪贴板粘贴图片
+// 从剪贴板粘贴图片（按钮点击触发）
 const handlePasteFromClipboard = async () => {
   if (props.disabled || isUploading.value) return
 
   try {
     // 检查浏览器是否支持 Clipboard API
     if (!navigator.clipboard || !navigator.clipboard.read) {
+      // 降级提示：使用 Ctrl/Cmd + V 快捷键
       emit('upload-error', {
-        code: 'CLIPBOARD_NOT_SUPPORTED',
-        message: '您的浏览器不支持剪贴板 API，请使用拖拽或点击上传'
+        code: 'CLIPBOARD_API_UNAVAILABLE',
+        message: '请先复制图片，然后按 Ctrl+V (Windows) 或 Cmd+V (Mac) 粘贴'
       })
       return
     }
@@ -252,56 +253,74 @@ const handlePasteFromClipboard = async () => {
     if (!imageFound) {
       emit('upload-error', {
         code: 'NO_IMAGE_IN_CLIPBOARD',
-        message: '剪贴板中没有图片，请先复制图片后再粘贴'
+        message: '剪贴板中没有图片，请先复制图片后再试'
       })
     }
   } catch (error) {
     console.error('Paste from clipboard error:', error)
 
-    // 处理权限错误
+    // 处理权限错误或其他错误
     if (error.name === 'NotAllowedError') {
       emit('upload-error', {
         code: 'CLIPBOARD_PERMISSION_DENIED',
-        message: '无法访问剪贴板，请允许浏览器读取剪贴板权限'
+        message: '请允许浏览器访问剪贴板，或使用 Ctrl+V (Windows) / Cmd+V (Mac) 粘贴'
+      })
+    } else if (error.name === 'NotFoundError') {
+      emit('upload-error', {
+        code: 'NO_IMAGE_IN_CLIPBOARD',
+        message: '剪贴板中没有图片，请先复制图片后再试'
       })
     } else {
+      // 其他错误，提示使用快捷键
       emit('upload-error', {
         code: 'CLIPBOARD_READ_ERROR',
-        message: error.message || '读取剪贴板失败，请重试'
+        message: '读取剪贴板失败，请尝试使用 Ctrl+V (Windows) 或 Cmd+V (Mac) 粘贴'
       })
     }
   }
 }
 
-// 键盘快捷键处理 (Ctrl/Cmd + V)
-const handleKeyDown = (e) => {
-  // 检查是否是 Ctrl/Cmd + V
-  if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
-    // 如果焦点在输入框或文本域，不拦截
-    const activeElement = document.activeElement
-    if (
-      activeElement &&
-      (activeElement.tagName === 'INPUT' ||
-       activeElement.tagName === 'TEXTAREA' ||
-       activeElement.isContentEditable)
-    ) {
-      return
-    }
+// 处理 paste 事件（更好的兼容性，不需要 Clipboard API 权限）
+const handlePaste = async (e) => {
+  // 如果焦点在输入框或文本域，不拦截
+  const activeElement = document.activeElement
+  if (
+    activeElement &&
+    (activeElement.tagName === 'INPUT' ||
+     activeElement.tagName === 'TEXTAREA' ||
+     activeElement.isContentEditable)
+  ) {
+    return
+  }
 
-    // 阻止默认行为，触发粘贴
-    e.preventDefault()
-    handlePasteFromClipboard()
+  if (props.disabled || isUploading.value) return
+
+  // 从 clipboardData 获取文件
+  const items = e.clipboardData?.items
+  if (!items || items.length === 0) return
+
+  // 查找图片类型
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]
+    if (item.type.startsWith('image/')) {
+      e.preventDefault()
+      const file = item.getAsFile()
+      if (file) {
+        await processFile(file)
+        return
+      }
+    }
   }
 }
 
-// 组件挂载时添加键盘监听
+// 组件挂载时添加 paste 事件监听
 onMounted(() => {
-  document.addEventListener('keydown', handleKeyDown)
+  document.addEventListener('paste', handlePaste)
 })
 
 // 组件卸载时移除监听
 onUnmounted(() => {
-  document.removeEventListener('keydown', handleKeyDown)
+  document.removeEventListener('paste', handlePaste)
 })
 </script>
 
