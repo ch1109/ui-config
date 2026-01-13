@@ -59,29 +59,45 @@
     
     <!-- Default: Click to upload (input nested inside label for reliability) -->
     <template v-else>
-      <label class="upload-placeholder">
-        <input 
-          type="file" 
-          accept="image/png,image/jpeg,.png,.jpg,.jpeg"
-          :disabled="disabled || isUploading"
-          @change="handleFileSelect"
-          class="hidden-input"
-        />
-        <div class="upload-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
-          </svg>
+      <div class="upload-placeholder-wrapper">
+        <label class="upload-placeholder">
+          <input
+            type="file"
+            accept="image/png,image/jpeg,.png,.jpg,.jpeg"
+            :disabled="disabled || isUploading"
+            @change="handleFileSelect"
+            class="hidden-input"
+          />
+          <div class="upload-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+            </svg>
+          </div>
+          <p class="upload-text">拖拽图片到此处</p>
+          <p class="upload-hint">或点击上传</p>
+          <p class="upload-formats">支持 PNG, JPG (最大 10MB)</p>
+        </label>
+        <div class="upload-actions">
+          <button
+            class="paste-btn"
+            type="button"
+            :disabled="disabled || isUploading"
+            @click="handlePasteFromClipboard"
+            title="从剪贴板粘贴图片 (Ctrl/Cmd + V)"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+            </svg>
+            粘贴图片
+          </button>
         </div>
-        <p class="upload-text">拖拽图片到此处</p>
-        <p class="upload-hint">或点击上传</p>
-        <p class="upload-formats">支持 PNG, JPG (最大 10MB)</p>
-      </label>
+      </div>
     </template>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { pageConfigApi } from '@/api'
 
 const props = defineProps({
@@ -191,6 +207,102 @@ const processFile = async (file) => {
 const handleRemove = () => {
   emit('update:modelValue', null)
 }
+
+// 从剪贴板粘贴图片
+const handlePasteFromClipboard = async () => {
+  if (props.disabled || isUploading.value) return
+
+  try {
+    // 检查浏览器是否支持 Clipboard API
+    if (!navigator.clipboard || !navigator.clipboard.read) {
+      emit('upload-error', {
+        code: 'CLIPBOARD_NOT_SUPPORTED',
+        message: '您的浏览器不支持剪贴板 API，请使用拖拽或点击上传'
+      })
+      return
+    }
+
+    // 读取剪贴板内容
+    const clipboardItems = await navigator.clipboard.read()
+
+    // 查找图片类型
+    let imageFound = false
+    for (const clipboardItem of clipboardItems) {
+      for (const type of clipboardItem.types) {
+        // 只处理图片类型
+        if (type.startsWith('image/')) {
+          imageFound = true
+          const blob = await clipboardItem.getType(type)
+
+          // 根据 MIME 类型确定文件扩展名
+          const extension = type === 'image/jpeg' ? 'jpg' : type.split('/')[1]
+          const filename = `pasted-image-${Date.now()}.${extension}`
+
+          // 转换为 File 对象
+          const file = new File([blob], filename, { type })
+
+          // 复用现有的上传逻辑
+          await processFile(file)
+          return
+        }
+      }
+    }
+
+    // 如果没有找到图片
+    if (!imageFound) {
+      emit('upload-error', {
+        code: 'NO_IMAGE_IN_CLIPBOARD',
+        message: '剪贴板中没有图片，请先复制图片后再粘贴'
+      })
+    }
+  } catch (error) {
+    console.error('Paste from clipboard error:', error)
+
+    // 处理权限错误
+    if (error.name === 'NotAllowedError') {
+      emit('upload-error', {
+        code: 'CLIPBOARD_PERMISSION_DENIED',
+        message: '无法访问剪贴板，请允许浏览器读取剪贴板权限'
+      })
+    } else {
+      emit('upload-error', {
+        code: 'CLIPBOARD_READ_ERROR',
+        message: error.message || '读取剪贴板失败，请重试'
+      })
+    }
+  }
+}
+
+// 键盘快捷键处理 (Ctrl/Cmd + V)
+const handleKeyDown = (e) => {
+  // 检查是否是 Ctrl/Cmd + V
+  if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+    // 如果焦点在输入框或文本域，不拦截
+    const activeElement = document.activeElement
+    if (
+      activeElement &&
+      (activeElement.tagName === 'INPUT' ||
+       activeElement.tagName === 'TEXTAREA' ||
+       activeElement.isContentEditable)
+    ) {
+      return
+    }
+
+    // 阻止默认行为，触发粘贴
+    e.preventDefault()
+    handlePasteFromClipboard()
+  }
+}
+
+// 组件挂载时添加键盘监听
+onMounted(() => {
+  document.addEventListener('keydown', handleKeyDown)
+})
+
+// 组件卸载时移除监听
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleKeyDown)
+})
 </script>
 
 <style lang="scss" scoped>
@@ -301,18 +413,29 @@ const handleRemove = () => {
   }
 }
 
-.upload-placeholder {
-  text-align: center;
-  padding: 32px;
+.upload-placeholder-wrapper {
   width: 100%;
   height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 16px;
+  padding: 20px;
+}
+
+.upload-placeholder {
+  text-align: center;
+  padding: 32px;
+  width: 100%;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   position: relative;
-  
+
   .upload-icon {
     width: 64px;
     height: 64px;
@@ -324,30 +447,74 @@ const handleRemove = () => {
     justify-content: center;
     transition: all 0.3s;
     box-shadow: var(--shadow-sm);
-    
+
     svg {
       width: 32px;
       height: 32px;
       color: var(--primary);
     }
   }
-  
+
   .upload-text {
     font-size: 15px;
     font-weight: 600;
     color: var(--text-heading);
     margin-bottom: 4px;
   }
-  
+
   .upload-hint {
     font-size: 13px;
     color: var(--text-secondary);
     margin-bottom: 12px;
   }
-  
+
   .upload-formats {
     font-size: 11px;
     color: var(--text-muted);
+  }
+}
+
+.upload-actions {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+
+.paste-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--primary);
+  background: var(--bg-elevated);
+  border: 1.5px solid var(--primary);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: var(--shadow-sm);
+
+  svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  &:hover:not(:disabled) {
+    background: var(--primary);
+    color: white;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25);
+  }
+
+  &:active:not(:disabled) {
+    transform: translateY(0);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 }
 
