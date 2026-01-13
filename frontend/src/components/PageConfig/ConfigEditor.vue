@@ -22,11 +22,11 @@
             type="text"
             class="form-input"
             :class="{ error: errors.page_id }"
-            placeholder="例如: home_page, user_profile"
+            placeholder="例如: 1.0home_page, 4.1face_authorization_page"
             @input="handleChange"
           />
           <span class="field-hint" :class="{ error: errors.page_id }">
-            {{ errors.page_id || '格式: snake_case 或 dot.notation' }}
+            {{ errors.page_id || '格式: {页面编号}{英文名称}，如 4.1face_authorization_page，单词间用下划线分隔' }}
           </span>
         </div>
         

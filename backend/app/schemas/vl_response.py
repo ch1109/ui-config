@@ -18,6 +18,7 @@ class ParsedElement(BaseModel):
 
 class VLParseResult(BaseModel):
     """VL 模型解析结果"""
+    page_id: Optional[str] = None  # 页面英文标识，如 "4.1face_authorization_page"
     page_name: Dict[str, str]  # {"zh-CN": "...", "en": "..."}
     page_description: Dict[str, str]
     elements: List[ParsedElement] = []

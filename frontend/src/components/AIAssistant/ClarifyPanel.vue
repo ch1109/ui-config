@@ -112,6 +112,10 @@
               </div>
               
               <div class="config-summary">
+                <div class="config-item" v-if="pendingConfig.page_id">
+                  <label>页面 ID：</label>
+                  <span class="page-id-value">{{ pendingConfig.page_id }}</span>
+                </div>
                 <div class="config-item" v-if="pendingConfig.page_name">
                   <label>页面名称：</label>
                   <span>{{ pendingConfig.page_name['zh-CN'] || '' }}</span>
@@ -735,6 +739,15 @@ const formatTime = (date) => {
     font-size: 14px;
     font-weight: 500;
     color: var(--text-heading);
+  }
+  
+  .page-id-value {
+    font-family: var(--font-mono, 'SF Mono', 'Monaco', 'Consolas', monospace);
+    font-size: 13px;
+    background: var(--bg-elevated);
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border-color);
   }
 }
 

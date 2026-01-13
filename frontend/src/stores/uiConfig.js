@@ -89,6 +89,10 @@ export const useUiConfigStore = defineStore('uiConfig', () => {
   
   // 应用 AI 配置
   function applyAiConfig(aiConfig) {
+    // 应用 page_id（英文标识）
+    if (aiConfig.page_id) {
+      draftConfig.value.page_id = aiConfig.page_id
+    }
     if (aiConfig.page_name) {
       draftConfig.value.name = {
         'zh-CN': aiConfig.page_name['zh-CN'] || '',

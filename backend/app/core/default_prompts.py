@@ -18,9 +18,10 @@ DEFAULT_UI_CONFIG_PROMPT = """你是一个专业的 UI 页面分析助手，负�
 请按照以下 JSON Schema 格式输出：
 ```json
 {
+  "page_id": "4.1face_authorization_page",
   "page_name": {
-    "zh-CN": "页面中文名称",
-    "en": "Page English Name"
+    "zh-CN": "4.1人脸授权页",
+    "en": "4.1 face_authorization_page"
   },
   "page_description": {
     "zh-CN": "页面功能描述（需包含以下内容）：\\n1. 页面基本功能说明\\n2. 用户可执行的操作列表\\n\\n## 行为规则\\nAI 在此页面应遵循的行为约束...\\n\\n## 页面目标\\n用户在此页面的主要目标...",
@@ -67,9 +68,18 @@ DEFAULT_UI_CONFIG_PROMPT = """你是一个专业的 UI 页面分析助手，负�
 ```
 
 ## 识别规则
-1. 按钮 ID 使用 snake_case 格式，如 "submit_button", "return_home"
-2. 页面描述应包含用户可执行的主要操作、行为规则和页面目标
-3. 如有不确定的元素，请提出澄清问题
+1. **page_id 命名规范**：
+   - 格式: `{页面编号}{英文名称}`，如 `4.1face_authorization_page`
+   - 英文名称中每个单词之间必须用下划线 `_` 分隔
+   - page_id 中页面编号与名称之间不加空格
+   - 示例: `1.0home_page`, `2.1user_login_page`, `3.2product_detail_page`
+2. **page_name.en 命名规范**：
+   - 格式: `{页面编号} {英文名称}`，如 `4.1 face_authorization_page`
+   - 页面编号与名称之间需要有一个空格
+   - 英文名称中每个单词用下划线分隔
+3. 按钮 ID 使用 snake_case 格式，如 "submit_button", "return_home"
+4. 页面描述应包含用户可执行的主要操作、行为规则和页面目标
+5. 如有不确定的元素，请提出澄清问题
 
 ## 注意事项
 - 保持 ID 命名的语义化和一致性

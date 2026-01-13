@@ -615,9 +615,10 @@ class VLModelService:
 
 请按以下 JSON 格式输出：
 {
+  "page_id": "4.1face_authorization_page",
   "page_name": {
-    "zh-CN": "页面中文名称",
-    "en": "Page English Name"
+    "zh-CN": "4.1人脸授权页",
+    "en": "4.1 face_authorization_page"
   },
   "page_description": {
     "zh-CN": "页面功能描述，包含：\\n1. 功能概述\\n2. 用户可执行的操作\\n\\n## 行为规则\\nAI 行为约束...\\n\\n## 页面目标\\n用户目标...",
@@ -640,11 +641,13 @@ class VLModelService:
 }
 
 注意：
-1. element_id 使用 snake_case 格式
-2. page_description 应包含完整的上下文信息：功能说明、行为规则和页面目标
-3. 如果某些元素的用途不明确，请设置 clarification_needed 为 true，并在 clarification_questions 中提出具体问题
-4. confidence 取值 0-1，表示识别的置信度
-5. 请只输出 JSON，不要有其他文字
+1. **page_id 命名规范**：格式为 `{页面编号}{英文名称}`，如 `4.1face_authorization_page`，编号与名称之间不加空格，英文名称中每个单词用下划线 `_` 分隔
+2. **page_name.en 命名规范**：格式为 `{页面编号} {英文名称}`，如 `4.1 face_authorization_page`，编号与名称之间需要一个空格
+3. element_id 使用 snake_case 格式
+4. page_description 应包含完整的上下文信息：功能说明、行为规则和页面目标
+5. 如果某些元素的用途不明确，请设置 clarification_needed 为 true，并在 clarification_questions 中提出具体问题
+6. confidence 取值 0-1，表示识别的置信度
+7. 请只输出 JSON，不要有其他文字
 """
     
     def _build_parse_result(self, data: dict) -> VLParseResult:
@@ -657,6 +660,7 @@ class VLModelService:
                 logger.warning(f"Failed to parse element: {elem}, error: {e}")
         
         return VLParseResult(
+            page_id=data.get("page_id"),
             page_name=data.get("page_name", {"zh-CN": "", "en": ""}),
             page_description=data.get("page_description", {"zh-CN": "", "en": ""}),
             elements=elements,

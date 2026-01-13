@@ -319,8 +319,7 @@ const projectColors = [
 const statusTabs = [
   { label: '全部', value: '' },
   { label: '已配置', value: 'configured' },
-  { label: '草稿', value: 'draft' },
-  { label: '待确认', value: 'pending' }
+  { label: '草稿', value: 'draft' }
 ]
 
 // 过滤后的页面

@@ -31,7 +31,15 @@
         <button class="action-btn secondary" @click="handleReset">
           重置
         </button>
-        <button class="action-btn primary" @click="handleSave" :disabled="isSaving">
+        <button
+          class="action-btn secondary"
+          @click="handleSaveDraft"
+          :disabled="isSaving || isSavingDraft"
+        >
+          <span v-if="isSavingDraft" class="btn-spinner dark"></span>
+          保存草稿
+        </button>
+        <button class="action-btn primary" @click="handleSave" :disabled="isSaving || isSavingDraft">
           <span v-if="isSaving" class="btn-spinner"></span>
           保存配置
         </button>
@@ -158,12 +166,26 @@
         </aside>
       </div>
     </div>
+    
+    <a-modal
+      v-model:open="showLeaveConfirm"
+      title="未保存的更改"
+      :maskClosable="false"
+      :closable="false"
+    >
+      <p>当前内容未保存，您要直接退出、保持草稿还是保存配置？</p>
+      <template #footer>
+        <a-button :disabled="isSaving || isSavingDraft" @click="handleLeaveDiscard">直接退出</a-button>
+        <a-button :loading="isSavingDraft" @click="handleLeaveSaveDraft">保持草稿</a-button>
+        <a-button type="primary" :loading="isSaving" @click="handleLeaveSaveConfig">保存配置</a-button>
+      </template>
+    </a-modal>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch, createVNode } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref, computed, onMounted, onBeforeUnmount, watch, createVNode } from 'vue'
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useUiConfigStore } from '@/stores/uiConfig'
 import { pageConfigApi } from '@/api'
 import { Modal, message } from 'ant-design-vue'
@@ -184,10 +206,13 @@ const parseResult = ref(null)
 const parseStatus = ref('')
 const isParsing = ref(false)
 const isSaving = ref(false)
+const isSavingDraft = ref(false)
 const showAIPanel = ref(false)
 const pendingAIConfig = ref(null)
 const validationErrors = ref({})
 const streamingContent = ref('')
+const showLeaveConfirm = ref(false)
+let pendingLeaveNext = null
 let pollTimer = null
 
 // JSON Preview
@@ -363,12 +388,12 @@ const validateConfig = () => {
   return errors
 }
 
-const handleSave = async () => {
+const saveConfig = async ({ redirect = true } = {}) => {
   const errors = validateConfig()
   if (Object.keys(errors).length > 0) {
     validationErrors.value = errors
     message.error('请检查表单错误')
-    return
+    return false
   }
   
   isSaving.value = true
@@ -394,14 +419,65 @@ const handleSave = async () => {
     message.success('保存成功')
     store.isDirty = false
     
-    if (isNew.value) {
+    if (isNew.value && redirect) {
       router.push(`/page/${config.page_id}`)
     }
+    return true
   } catch (error) {
     message.error(error.response?.data?.message || '保存失败')
+    return false
   } finally {
     isSaving.value = false
   }
+}
+
+const saveDraft = async ({ redirect = true } = {}) => {
+  const pageId = store.draftConfig.page_id?.trim()
+  if (!pageId) {
+    message.error('请先填写页面 ID')
+    return false
+  }
+  if (!/^[a-zA-Z0-9_\.]+$/.test(pageId)) {
+    message.error('页面 ID 只能包含字母、数字、下划线和点')
+    return false
+  }
+  
+  isSavingDraft.value = true
+  
+  try {
+    const config = store.draftConfig
+    const saveData = {
+      page_id: pageId,
+      name: config.name,
+      description: config.description,
+      button_list: config.button_list,
+      optional_actions: config.optional_actions,
+      screenshot_url: imageUrl.value
+    }
+    
+    await pageConfigApi.saveDraft(saveData)
+    
+    message.success('草稿已保存')
+    store.isDirty = false
+    
+    if (isNew.value && redirect) {
+      router.replace(`/page/${pageId}`)
+    }
+    return true
+  } catch (error) {
+    message.error(error.response?.data?.message || '保存草稿失败')
+    return false
+  } finally {
+    isSavingDraft.value = false
+  }
+}
+
+const handleSave = async () => {
+  await saveConfig()
+}
+
+const handleSaveDraft = async () => {
+  await saveDraft()
 }
 
 const copyJson = async () => {
@@ -422,6 +498,58 @@ const downloadJson = () => {
   a.click()
   URL.revokeObjectURL(url)
 }
+
+const proceedLeave = () => {
+  const next = pendingLeaveNext
+  pendingLeaveNext = null
+  showLeaveConfirm.value = false
+  if (next) {
+    next()
+  }
+}
+
+const handleLeaveDiscard = () => {
+  store.isDirty = false
+  proceedLeave()
+}
+
+const handleLeaveSaveDraft = async () => {
+  const saved = await saveDraft({ redirect: false })
+  if (saved) {
+    proceedLeave()
+  }
+}
+
+const handleLeaveSaveConfig = async () => {
+  const saved = await saveConfig({ redirect: false })
+  if (saved) {
+    proceedLeave()
+  }
+}
+
+onBeforeRouteLeave((to, from, next) => {
+  if (store.isDirty) {
+    pendingLeaveNext = next
+    showLeaveConfirm.value = true
+    return
+  }
+  next()
+})
+
+const handleBeforeUnload = (e) => {
+  if (store.isDirty) {
+    e.preventDefault()
+    e.returnValue = ''
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('beforeunload', handleBeforeUnload)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+})
 
 watch(() => route.path, () => {
   if (pollTimer) clearInterval(pollTimer)
@@ -589,6 +717,11 @@ watch(() => route.path, () => {
   border-top-color: white;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
+}
+
+.btn-spinner.dark {
+  border-color: rgba(15, 23, 42, 0.2);
+  border-top-color: var(--text-secondary);
 }
 
 @keyframes spin {

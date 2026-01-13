@@ -79,6 +79,10 @@ class ConfigService:
         """
         构建 UI Config JSON
         对应需求: REQ-M4-003
+        
+        page_id 命名规范：
+        - 格式: {页面编号}{英文名称}，如 4.1face_authorization_page
+        - 编号与名称之间不加空格，英文名称中每个单词用下划线分隔
         """
         page_id = page_data.get("page_id", "unnamed_page")
         

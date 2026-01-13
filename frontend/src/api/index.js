@@ -104,6 +104,7 @@ export const pageConfigApi = {
   get: (pageId) => api.get(`/pages/${pageId}`),
   create: (data) => api.post('/pages', data),
   update: (pageId, data) => api.put(`/pages/${pageId}`, data),
+  saveDraft: (data) => api.post('/pages/draft', data),
   delete: (pageId) => api.delete(`/pages/${pageId}`),
   
   // 图片上传
@@ -672,4 +673,3 @@ export const mcpTestApi = {
 }
 
 export default api
-

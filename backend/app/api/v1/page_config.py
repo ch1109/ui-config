@@ -17,7 +17,7 @@ import logging
 
 from app.database import get_db, AsyncSessionLocal
 from app.schemas.page_config import (
-    PageConfigCreate, PageConfigUpdate, PageConfigResponse, PageConfigListItem,
+    PageConfigCreate, PageConfigUpdate, PageConfigDraft, PageConfigResponse, PageConfigListItem,
     MultiLangText, AIContext
 )
 from app.schemas.vl_response import ParseStatusResponse, ClarifyQuestion
@@ -565,6 +565,125 @@ async def create_page(
     )
 
 
+@router.post("/draft", response_model=PageConfigResponse)
+async def save_draft(
+    config: PageConfigDraft,
+    db: AsyncSession = Depends(get_db)
+):
+    """保存页面配置草稿"""
+    result = await db.execute(
+        select(PageConfig).where(PageConfig.page_id == config.page_id)
+    )
+    page = result.scalar_one_or_none()
+
+    name_zh = ""
+    name_en = ""
+    if config.name:
+        name_zh = config.name.zh_CN or ""
+        name_en = config.name.en or ""
+    elif page:
+        name_zh = page.name_zh or ""
+        name_en = page.name_en or ""
+
+    description_zh = ""
+    description_en = ""
+    if config.description:
+        description_zh = config.description.zh_CN or ""
+        description_en = config.description.en or ""
+    elif page:
+        description_zh = page.description_zh or ""
+        description_en = page.description_en or ""
+
+    if config.ai_context:
+        description_zh = _merge_ai_context_to_description_zh(description_zh, config.ai_context)
+        description_en = _merge_ai_context_to_description_en(description_en, config.ai_context)
+
+    button_list = config.button_list if config.button_list is not None else None
+    optional_actions = config.optional_actions if config.optional_actions is not None else None
+
+    if page:
+        page.name_zh = name_zh
+        page.name_en = name_en
+        page.description_zh = description_zh
+        page.description_en = description_en
+        if button_list is not None:
+            page.button_list = button_list
+        if optional_actions is not None:
+            page.optional_actions = optional_actions
+        page.ai_context = None
+        if config.screenshot_url is not None:
+            page.screenshot_url = config.screenshot_url
+        if config.project_id is not None:
+            if config.project_id == 0:
+                page.project_id = None
+            else:
+                project_result = await db.execute(
+                    select(Project).where(Project.id == config.project_id)
+                )
+                project = project_result.scalar_one_or_none()
+                if not project:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"项目 ID {config.project_id} 不存在"
+                    )
+                page.project_id = config.project_id
+        page.status = "draft"
+    else:
+        if config.project_id not in (0, None):
+            project_result = await db.execute(
+                select(Project).where(Project.id == config.project_id)
+            )
+            project = project_result.scalar_one_or_none()
+            if not project:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"项目 ID {config.project_id} 不存在"
+                )
+        page = PageConfig(
+            page_id=config.page_id,
+            name_zh=name_zh,
+            name_en=name_en,
+            description_zh=description_zh,
+            description_en=description_en,
+            button_list=button_list or [],
+            optional_actions=optional_actions or [],
+            ai_context=None,
+            screenshot_url=config.screenshot_url,
+            project_id=config.project_id if config.project_id not in (0, None) else None,
+            status="draft"
+        )
+        db.add(page)
+
+    await db.commit()
+    await db.refresh(page)
+
+    project_name = None
+    if page.project_id:
+        project_result = await db.execute(
+            select(Project.name).where(Project.id == page.project_id)
+        )
+        project_name = project_result.scalar_one_or_none()
+
+    return PageConfigResponse(
+        id=page.id,
+        page_id=page.page_id,
+        name=MultiLangText(**{"zh-CN": page.name_zh or "", "en": page.name_en or ""}),
+        description=MultiLangText(**{
+            "zh-CN": page.get_full_description_zh() or "",
+            "en": page.get_full_description_en() or ""
+        }),
+        button_list=page.button_list or [],
+        optional_actions=page.optional_actions or [],
+        ai_context=None,
+        screenshot_url=page.screenshot_url,
+        project_id=page.project_id,
+        project_name=project_name,
+        status=page.status,
+        created_at=page.created_at,
+        updated_at=page.updated_at
+    )
+
+
 @router.put("/{page_id}", response_model=PageConfigResponse)
 async def update_page(
     page_id: str,
@@ -635,6 +754,8 @@ async def update_page(
                     detail=f"项目 ID {config.project_id} 不存在"
                 )
             page.project_id = config.project_id
+
+    page.status = "configured"
     
     await db.commit()
     await db.refresh(page)
@@ -686,4 +807,3 @@ async def delete_page(page_id: str, db: AsyncSession = Depends(get_db)):
     await db.commit()
     
     return {"success": True, "message": f"页面 '{page_id}' 已删除"}
-

@@ -20,6 +20,14 @@ class MultiLangText(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class MultiLangTextDraft(BaseModel):
+    """草稿多语言文本"""
+    zh_CN: Optional[str] = Field(None, alias="zh-CN")
+    en: Optional[str] = None
+
+    model_config = {"populate_by_name": True}
+
+
 class AIContext(BaseModel):
     """
     AI 上下文配置
@@ -95,6 +103,34 @@ class PageConfigUpdate(BaseModel):
         return v
 
 
+class PageConfigDraft(BaseModel):
+    """保存草稿请求"""
+    page_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        description="页面唯一标识，英文标识"
+    )
+    name: Optional[MultiLangTextDraft] = None
+    description: Optional[MultiLangTextDraft] = None
+    button_list: Optional[List[str]] = None
+    optional_actions: Optional[List[str]] = None
+    # @deprecated - 保留用于向后兼容
+    ai_context: Optional[AIContext] = Field(
+        None,
+        description="[已废弃] AI 上下文，现已合并到 description 字段"
+    )
+    screenshot_url: Optional[str] = None
+    project_id: Optional[int] = None
+
+    @field_validator('page_id')
+    @classmethod
+    def validate_page_id(cls, v):
+        if not re.match(r'^[a-zA-Z0-9_\.]+$', v):
+            raise ValueError('page_id 只能包含字母、数字、下划线和点')
+        return v
+
+
 class PageConfigResponse(BaseModel):
     """页面配置响应"""
     id: int
@@ -128,4 +164,3 @@ class PageConfigListItem(BaseModel):
     project_name: Optional[str] = None
     screenshot_url: Optional[str] = None
     updated_at: Optional[datetime] = None
-
