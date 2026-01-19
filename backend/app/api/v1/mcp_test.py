@@ -25,6 +25,7 @@ from app.services.mcp_client_service import (
     MCPPrompt
 )
 from app.services.stdio_mcp_manager import stdio_mcp_manager
+from app.services.sse_mcp_client import sse_mcp_client, SSEConnectionState
 from app.api.v1.mcp import PRESET_MCP_SERVERS
 
 logger = logging.getLogger(__name__)
@@ -875,4 +876,469 @@ def _generate_test_args(tool: Dict[str, Any]) -> Dict[str, Any]:
                 args[prop_name] = {}
     
     return args
+
+
+# ========== SSE MCP 服务器 API ==========
+
+class SSEServerConnectRequest(BaseModel):
+    """SSE 服务器连接请求"""
+    server_key: str
+    base_url: str
+    sse_endpoint: str = "/sse"
+    message_endpoint: str = "/message"
+    auth_token: Optional[str] = None
+    auth_type: str = "bearer"  # bearer, api_key, custom
+    custom_headers: Optional[Dict[str, str]] = None
+    auto_reconnect: bool = True
+
+
+class SSEToolCallRequest(BaseModel):
+    """SSE 工具调用请求"""
+    server_key: str
+    tool_name: str
+    arguments: Dict[str, Any] = {}
+
+
+class SSEResourceRequest(BaseModel):
+    """SSE 资源请求"""
+    server_key: str
+    uri: str
+
+
+class SSEPromptRequest(BaseModel):
+    """SSE 提示模板请求"""
+    server_key: str
+    name: str
+    arguments: Dict[str, str] = {}
+
+
+@router.get("/sse/status")
+async def get_sse_servers_status():
+    """
+    获取所有 SSE MCP 服务器的连接状态
+    
+    返回所有已连接的 SSE 服务器及其详细状态
+    """
+    return {
+        "success": True,
+        "servers": sse_mcp_client.get_status(),
+        "connected_count": len(sse_mcp_client.list_connected_servers())
+    }
+
+
+@router.post("/sse/connect")
+async def connect_sse_server(request: SSEServerConnectRequest):
+    """
+    连接到 SSE MCP 服务器
+    
+    支持 Bearer Token、API Key 和自定义认证方式
+    """
+    try:
+        success, message = await sse_mcp_client.connect(
+            server_key=request.server_key,
+            base_url=request.base_url,
+            sse_endpoint=request.sse_endpoint,
+            message_endpoint=request.message_endpoint,
+            auth_token=request.auth_token,
+            auth_type=request.auth_type,
+            custom_headers=request.custom_headers,
+            auto_reconnect=request.auto_reconnect
+        )
+        
+        if not success:
+            raise HTTPException(status_code=500, detail=message)
+        
+        # 获取连接后的状态
+        status = sse_mcp_client.get_session_status(request.server_key)
+        
+        return {
+            "success": True,
+            "message": message,
+            "server_key": request.server_key,
+            "status": status
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"SSE 连接失败: {e}")
+        raise HTTPException(status_code=500, detail=f"连接失败: {str(e)}")
+
+
+@router.post("/sse/connect-db/{server_id}")
+async def connect_sse_server_from_db(
+    server_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    从数据库配置连接 SSE MCP 服务器
+    
+    根据数据库中的服务器配置自动建立连接
+    """
+    result = await db.execute(
+        select(MCPServer).where(MCPServer.id == server_id)
+    )
+    server = result.scalar_one_or_none()
+    
+    if not server:
+        raise HTTPException(status_code=404, detail="服务器不存在")
+    
+    if server.transport != "sse" and server.transport != "http":
+        raise HTTPException(
+            status_code=400, 
+            detail=f"该服务器不是 SSE/HTTP 类型 (当前: {server.transport})"
+        )
+    
+    if not server.server_url:
+        raise HTTPException(status_code=400, detail="服务器未配置 URL")
+    
+    server_key = f"db_{server_id}"
+    
+    # 获取认证配置
+    auth_token = None
+    auth_type = server.auth_type or "none"
+    if server.auth_config:
+        auth_token = server.auth_config.get("api_key") or server.auth_config.get("token")
+    
+    try:
+        success, message = await sse_mcp_client.connect(
+            server_key=server_key,
+            base_url=server.server_url,
+            auth_token=auth_token,
+            auth_type=auth_type
+        )
+        
+        if not success:
+            raise HTTPException(status_code=500, detail=message)
+        
+        # 更新数据库状态
+        server.status = "enabled"
+        await db.commit()
+        
+        status = sse_mcp_client.get_session_status(server_key)
+        
+        return {
+            "success": True,
+            "message": message,
+            "server_key": server_key,
+            "server_name": server.name,
+            "status": status
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"SSE 连接失败: {e}")
+        raise HTTPException(status_code=500, detail=f"连接失败: {str(e)}")
+
+
+@router.post("/sse/disconnect/{server_key}")
+async def disconnect_sse_server(server_key: str):
+    """
+    断开 SSE MCP 服务器连接
+    """
+    success, message = await sse_mcp_client.disconnect(server_key)
+    
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+    
+    return {
+        "success": True,
+        "message": message
+    }
+
+
+@router.post("/sse/reconnect/{server_key}")
+async def reconnect_sse_server(server_key: str):
+    """
+    手动重连 SSE MCP 服务器
+    """
+    success, message = await sse_mcp_client.reconnect(server_key)
+    
+    if not success:
+        raise HTTPException(status_code=500, detail=message)
+    
+    return {
+        "success": True,
+        "message": message
+    }
+
+
+@router.get("/sse/test/{server_key}")
+async def test_sse_connection(server_key: str):
+    """
+    测试 SSE 连接健康状态
+    
+    发送测试请求并返回延迟信息
+    """
+    is_healthy, message, latency_ms = await sse_mcp_client.test_connection(server_key)
+    
+    return {
+        "success": is_healthy,
+        "message": message,
+        "latency_ms": round(latency_ms, 2)
+    }
+
+
+@router.get("/sse/{server_key}/tools")
+async def list_sse_server_tools(server_key: str):
+    """
+    获取 SSE MCP 服务器的工具列表
+    """
+    if not sse_mcp_client.is_connected(server_key):
+        raise HTTPException(
+            status_code=400,
+            detail=f"服务器 {server_key} 未连接"
+        )
+    
+    try:
+        tools = await sse_mcp_client.list_tools(server_key)
+        return {
+            "success": True,
+            "server": server_key,
+            "tools": tools
+        }
+    except Exception as e:
+        logger.error(f"获取工具列表失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sse/tools/call")
+async def call_sse_server_tool(request: SSEToolCallRequest):
+    """
+    调用 SSE MCP 服务器的工具
+    """
+    if not sse_mcp_client.is_connected(request.server_key):
+        raise HTTPException(
+            status_code=400,
+            detail=f"服务器 {request.server_key} 未连接"
+        )
+    
+    start_time = time.time()
+    
+    try:
+        result = await sse_mcp_client.call_tool(
+            request.server_key,
+            request.tool_name,
+            request.arguments
+        )
+        duration_ms = (time.time() - start_time) * 1000
+        
+        return MCPTestResult(
+            success=True,
+            data=result,
+            duration_ms=round(duration_ms, 2)
+        )
+    except Exception as e:
+        logger.error(f"SSE 工具调用失败: {e}")
+        return MCPTestResult(
+            success=False,
+            error=str(e),
+            duration_ms=round((time.time() - start_time) * 1000, 2)
+        )
+
+
+@router.get("/sse/{server_key}/resources")
+async def list_sse_server_resources(server_key: str):
+    """
+    获取 SSE MCP 服务器的资源列表
+    """
+    if not sse_mcp_client.is_connected(server_key):
+        raise HTTPException(
+            status_code=400,
+            detail=f"服务器 {server_key} 未连接"
+        )
+    
+    try:
+        resources = await sse_mcp_client.list_resources(server_key)
+        return {
+            "success": True,
+            "server": server_key,
+            "resources": resources
+        }
+    except Exception as e:
+        logger.error(f"获取资源列表失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sse/resources/read")
+async def read_sse_server_resource(request: SSEResourceRequest):
+    """
+    读取 SSE MCP 服务器的资源
+    """
+    if not sse_mcp_client.is_connected(request.server_key):
+        raise HTTPException(
+            status_code=400,
+            detail=f"服务器 {request.server_key} 未连接"
+        )
+    
+    start_time = time.time()
+    
+    try:
+        result = await sse_mcp_client.read_resource(
+            request.server_key,
+            request.uri
+        )
+        duration_ms = (time.time() - start_time) * 1000
+        
+        return MCPTestResult(
+            success=True,
+            data=result,
+            duration_ms=round(duration_ms, 2)
+        )
+    except Exception as e:
+        logger.error(f"SSE 资源读取失败: {e}")
+        return MCPTestResult(
+            success=False,
+            error=str(e),
+            duration_ms=round((time.time() - start_time) * 1000, 2)
+        )
+
+
+@router.get("/sse/{server_key}/prompts")
+async def list_sse_server_prompts(server_key: str):
+    """
+    获取 SSE MCP 服务器的提示模板列表
+    """
+    if not sse_mcp_client.is_connected(server_key):
+        raise HTTPException(
+            status_code=400,
+            detail=f"服务器 {server_key} 未连接"
+        )
+    
+    try:
+        prompts = await sse_mcp_client.list_prompts(server_key)
+        return {
+            "success": True,
+            "server": server_key,
+            "prompts": prompts
+        }
+    except Exception as e:
+        logger.error(f"获取提示模板列表失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sse/prompts/get")
+async def get_sse_server_prompt(request: SSEPromptRequest):
+    """
+    获取 SSE MCP 服务器的提示模板内容
+    """
+    if not sse_mcp_client.is_connected(request.server_key):
+        raise HTTPException(
+            status_code=400,
+            detail=f"服务器 {request.server_key} 未连接"
+        )
+    
+    start_time = time.time()
+    
+    try:
+        result = await sse_mcp_client.get_prompt(
+            request.server_key,
+            request.name,
+            request.arguments
+        )
+        duration_ms = (time.time() - start_time) * 1000
+        
+        return MCPTestResult(
+            success=True,
+            data=result,
+            duration_ms=round(duration_ms, 2)
+        )
+    except Exception as e:
+        logger.error(f"SSE 提示模板获取失败: {e}")
+        return MCPTestResult(
+            success=False,
+            error=str(e),
+            duration_ms=round((time.time() - start_time) * 1000, 2)
+        )
+
+
+@router.get("/sse/all-tools")
+async def get_all_sse_tools():
+    """
+    获取所有已连接 SSE 服务器的工具列表
+    
+    返回聚合后的工具列表，包含服务器标识
+    """
+    return {
+        "success": True,
+        "tools": sse_mcp_client.get_all_tools(),
+        "connected_servers": sse_mcp_client.list_connected_servers()
+    }
+
+
+@router.post("/sse/{server_key}/batch-test")
+async def batch_test_sse_server(server_key: str):
+    """
+    批量测试 SSE MCP 服务器的所有工具
+    """
+    if not sse_mcp_client.is_connected(server_key):
+        raise HTTPException(
+            status_code=400,
+            detail=f"服务器 {server_key} 未连接"
+        )
+    
+    session = sse_mcp_client.get_session(server_key)
+    if not session:
+        raise HTTPException(status_code=500, detail="获取会话失败")
+    
+    results = []
+    
+    # 测试工具
+    for tool in session.tools[:5]:
+        tool_name = tool.get("name", "")
+        start = time.time()
+        
+        try:
+            test_args = _generate_test_args(tool)
+            result = await sse_mcp_client.call_tool(server_key, tool_name, test_args)
+            
+            results.append({
+                "type": "tool",
+                "name": tool_name,
+                "success": True,
+                "result": result,
+                "duration_ms": round((time.time() - start) * 1000, 2)
+            })
+        except Exception as e:
+            results.append({
+                "type": "tool",
+                "name": tool_name,
+                "success": False,
+                "error": str(e),
+                "duration_ms": round((time.time() - start) * 1000, 2)
+            })
+    
+    # 测试资源
+    for resource in session.resources[:3]:
+        uri = resource.get("uri", "")
+        start = time.time()
+        
+        try:
+            result = await sse_mcp_client.read_resource(server_key, uri)
+            results.append({
+                "type": "resource",
+                "uri": uri,
+                "success": True,
+                "result": result,
+                "duration_ms": round((time.time() - start) * 1000, 2)
+            })
+        except Exception as e:
+            results.append({
+                "type": "resource",
+                "uri": uri,
+                "success": False,
+                "error": str(e),
+                "duration_ms": round((time.time() - start) * 1000, 2)
+            })
+    
+    total = len(results)
+    passed = sum(1 for r in results if r["success"])
+    
+    return {
+        "success": passed == total,
+        "summary": f"{passed}/{total} 测试通过",
+        "server": server_key,
+        "results": results
+    }
 

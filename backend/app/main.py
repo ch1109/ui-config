@@ -5,10 +5,12 @@ UI Config 智能配置系统
 """
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse
+from pathlib import Path
 import os
 import logging
 
@@ -113,7 +115,11 @@ app.include_router(mcp_host.router)  # MCP Host 完整功能
 
 @app.get("/")
 async def root():
-    """根路径 - 健康检查"""
+    """根路径 - 前端入口或健康检查"""
+    if FRONTEND_DIST_DIR.exists():
+        index_path = FRONTEND_DIST_DIR / "index.html"
+        if index_path.exists():
+            return FileResponse(index_path)
     return {
         "success": True,
         "app": settings.APP_NAME,
@@ -130,4 +136,42 @@ async def health_check():
         "app": settings.APP_NAME,
         "version": settings.APP_VERSION
     }
+
+
+# ==================== 前端静态文件服务 ====================
+# 获取前端 dist 目录路径（从后端 main.py 向上两级到 backend，再向上到项目根目录）
+_backend_dir = Path(__file__).parent.parent  # backend/app -> backend
+_project_root = _backend_dir.parent  # backend -> UI config
+FRONTEND_DIST_DIR = _project_root / "frontend" / "dist"
+logger.info(f"Looking for frontend at: {FRONTEND_DIST_DIR}")
+
+if FRONTEND_DIST_DIR.exists():
+    # 挂载前端静态资源（assets 目录）
+    app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST_DIR / "assets")), name="frontend_assets")
+    
+    @app.get("/{full_path:path}")
+    async def serve_frontend(request: Request, full_path: str):
+        """
+        SPA 前端路由回退
+        所有未匹配的路由都返回 index.html，由前端路由处理
+        """
+        # 如果请求的是 API 路径，返回 404
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="API endpoint not found")
+        
+        # 检查是否是静态文件请求
+        file_path = FRONTEND_DIST_DIR / full_path
+        if file_path.exists() and file_path.is_file():
+            return FileResponse(file_path)
+        
+        # 其他所有请求返回 index.html（SPA 路由）
+        index_path = FRONTEND_DIST_DIR / "index.html"
+        if index_path.exists():
+            return FileResponse(index_path)
+        
+        raise HTTPException(status_code=404, detail="Frontend not found")
+    
+    logger.info(f"Frontend served from: {FRONTEND_DIST_DIR}")
+else:
+    logger.warning(f"Frontend dist directory not found: {FRONTEND_DIST_DIR}")
 

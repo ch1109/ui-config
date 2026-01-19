@@ -143,6 +143,11 @@
                     启动
                   </button>
                   <template v-else>
+                    <button class="action-btn secondary" @click="openRootsDrawer(server)" title="工作区目录">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                      </svg>
+                    </button>
                     <button class="action-btn test" @click="openTestPanel(server)">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
@@ -284,6 +289,7 @@
                 </span>
               </div>
               <div class="footer-actions">
+                <!-- STDIO 服务器按钮 -->
                 <template v-if="server.transport === 'stdio'">
                   <button 
                     v-if="!isCustomServerRunning(server)" 
@@ -298,6 +304,11 @@
                     启动
                   </button>
                   <template v-else>
+                    <button class="action-btn secondary" @click="openRootsDrawer(server)" title="工作区目录">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                      </svg>
+                    </button>
                     <button class="action-btn test" @click="openCustomTestPanel(server)">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
@@ -316,6 +327,47 @@
                     </button>
                   </template>
                 </template>
+                <!-- SSE/HTTP 服务器按钮 -->
+                <template v-else-if="server.transport === 'sse' || server.transport === 'http'">
+                  <button 
+                    v-if="!isSseServerConnected(server)" 
+                    class="action-btn start"
+                    @click="connectSseServer(server)"
+                    :disabled="connectingSseServer === `db_${server.id}`"
+                  >
+                    <span v-if="connectingSseServer === `db_${server.id}`" class="spinner"></span>
+                    <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M5 12h14M12 5l7 7-7 7"/>
+                    </svg>
+                    连接
+                  </button>
+                  <template v-else>
+                    <button class="action-btn test" @click="openSseTestPanel(server)">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+                      </svg>
+                      测试
+                    </button>
+                    <button class="action-btn secondary" @click="testSseConnection(server)">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M12 6v6l4 2"/>
+                      </svg>
+                    </button>
+                    <button 
+                      class="action-btn stop"
+                      @click="disconnectSseServer(server)"
+                      :disabled="disconnectingSseServer === `db_${server.id}`"
+                    >
+                      <span v-if="disconnectingSseServer === `db_${server.id}`" class="spinner small"></span>
+                      <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                      </svg>
+                    </button>
+                  </template>
+                </template>
+                <!-- 其他类型服务器 -->
                 <button v-else class="action-btn test" @click="testConnection(server)">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
@@ -563,12 +615,131 @@
         </button>
       </div>
     </a-modal>
+    
+    <!-- Roots 管理抽屉 -->
+    <transition name="drawer">
+      <div v-if="rootsDrawerVisible" class="roots-drawer">
+        <div class="drawer-header">
+          <h3>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+            {{ rootsServer?.name }} - 工作区目录
+          </h3>
+          <button class="close-btn" @click="closeRootsDrawer">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"/>
+              <line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+        
+        <div class="drawer-content">
+          <!-- 说明信息 -->
+          <div class="roots-info">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M12 16v-4M12 8h.01"/>
+            </svg>
+            <p>工作区目录定义了 MCP 服务器可以访问的文件系统范围。配置后，工具调用中的文件路径将被限制在这些目录内。</p>
+          </div>
+          
+          <!-- 添加根目录 -->
+          <div class="add-root-section">
+            <h4>添加根目录</h4>
+            <div class="add-root-form">
+              <div class="form-row">
+                <input 
+                  v-model="newRootPath"
+                  type="text"
+                  class="form-input"
+                  placeholder="输入目录路径，如 /Users/project"
+                  @blur="validatePathInput"
+                />
+              </div>
+              <div class="form-row">
+                <input 
+                  v-model="newRootName"
+                  type="text"
+                  class="form-input small"
+                  placeholder="名称（可选）"
+                />
+                <button class="add-root-btn" @click="addRoot" :disabled="addingRoot || !newRootPath.trim()">
+                  <span v-if="addingRoot" class="spinner small"></span>
+                  <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="12" y1="5" x2="12" y2="19"/>
+                    <line x1="5" y1="12" x2="19" y2="12"/>
+                  </svg>
+                  添加
+                </button>
+              </div>
+              <div v-if="validationResult" :class="['validation-result', validationResult.allowed ? 'success' : 'warning']">
+                <svg v-if="validationResult.allowed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="12" y1="8" x2="12" y2="12"/>
+                  <line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+                <span>{{ validationResult.message }}</span>
+              </div>
+            </div>
+          </div>
+          
+          <!-- 根目录列表 -->
+          <div class="roots-list-section">
+            <h4>
+              已配置的根目录
+              <span class="count">{{ rootsList.length }}</span>
+            </h4>
+            
+            <div v-if="loadingRoots" class="loading-state">
+              <div class="loader"></div>
+              <span>加载中...</span>
+            </div>
+            
+            <div v-else-if="rootsList.length === 0" class="empty-state small">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                <line x1="12" y1="11" x2="12" y2="17"/>
+                <line x1="9" y1="14" x2="15" y2="14"/>
+              </svg>
+              <p>暂无根目录配置</p>
+              <small>添加根目录后，工具调用将限制在这些目录范围内</small>
+            </div>
+            
+            <div v-else class="roots-list">
+              <div v-for="root in rootsList" :key="root.uri" class="root-item">
+                <div class="root-info">
+                  <div class="root-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                    </svg>
+                  </div>
+                  <div class="root-details">
+                    <div class="root-name">{{ root.name || '未命名' }}</div>
+                    <div class="root-path">{{ root.path }}</div>
+                    <div v-if="root.type && root.type !== 'custom'" class="root-type">{{ root.type }}</div>
+                  </div>
+                </div>
+                <button class="remove-root-btn" @click="removeRoot(root)" title="移除">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </transition>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, reactive, onMounted, createVNode } from 'vue'
-import { mcpApi, mcpTestApi, mcpContextApi } from '@/api'
+import { mcpApi, mcpTestApi, mcpContextApi, mcpHostApi } from '@/api'
 import { Modal, message } from 'ant-design-vue'
 import { ExclamationCircleOutlined } from '@ant-design/icons-vue'
 
@@ -587,6 +758,11 @@ const stdioStatus = ref({})
 const startingServer = ref(null)
 const stoppingServer = ref(null)
 
+// SSE server state
+const sseStatus = ref({})
+const connectingSseServer = ref(null)
+const disconnectingSseServer = ref(null)
+
 // Test panel state
 const testingServer = ref(null)
 const loadingTools = ref(false)
@@ -595,6 +771,17 @@ const selectedTool = ref(null)
 const toolArgs = reactive({})
 const callingTool = ref(false)
 const toolResult = ref(null)
+
+// Roots 管理状态
+const rootsDrawerVisible = ref(false)
+const rootsServer = ref(null)
+const rootsList = ref([])
+const loadingRoots = ref(false)
+const addingRoot = ref(false)
+const newRootPath = ref('')
+const newRootName = ref('')
+const validatingPath = ref(false)
+const validationResult = ref(null)
 
 const formData = ref({
   name: '',
@@ -623,6 +810,7 @@ onMounted(async () => {
   await Promise.all([
     loadServers(),
     loadStdioStatus(),
+    loadSseStatus(),
     loadMcpContext()
   ])
 })
@@ -642,6 +830,15 @@ const loadStdioStatus = async () => {
     stdioStatus.value = res.servers || {}
   } catch (error) {
     console.error('Failed to load stdio status:', error)
+  }
+}
+
+const loadSseStatus = async () => {
+  try {
+    const res = await mcpTestApi.getSseStatus()
+    sseStatus.value = res.servers || {}
+  } catch (error) {
+    console.error('Failed to load SSE status:', error)
   }
 }
 
@@ -696,6 +893,11 @@ const getStatusLabel = (server) => {
 }
 
 const getCustomStatusClass = (server) => {
+  // SSE 服务器
+  if (server.transport === 'sse' || server.transport === 'http') {
+    if (isSseServerConnected(server)) return 'running'
+  }
+  // STDIO 服务器
   if (isCustomServerRunning(server)) return 'running'
   if (server.status === 'enabled') return 'success'
   if (server.status === 'error') return 'error'
@@ -703,6 +905,17 @@ const getCustomStatusClass = (server) => {
 }
 
 const getCustomStatusLabel = (server) => {
+  // SSE 服务器
+  if (server.transport === 'sse' || server.transport === 'http') {
+    if (isSseServerConnected(server)) return '已连接'
+    const key = `db_${server.id}`
+    const status = sseStatus.value[key]
+    if (status?.state === 'connecting') return '连接中'
+    if (status?.state === 'reconnecting') return '重连中'
+    if (status?.state === 'error') return status.error_message || '连接失败'
+    return '未连接'
+  }
+  // STDIO 服务器
   if (isCustomServerRunning(server)) return '运行中'
   if (server.transport === 'stdio') {
     const map = {
@@ -860,6 +1073,91 @@ const testConnection = async (server) => {
   }
 }
 
+// ========== SSE 服务器操作 ==========
+
+const isSseServerConnected = (server) => {
+  if (server.transport !== 'sse' && server.transport !== 'http') return false
+  const key = `db_${server.id}`
+  return sseStatus.value[key]?.state === 'connected'
+}
+
+const connectSseServer = async (server) => {
+  const key = `db_${server.id}`
+  connectingSseServer.value = key
+  
+  try {
+    const res = await mcpTestApi.connectSseServerFromDb(server.id)
+    if (res.success) {
+      message.success(`${server.name} 连接成功！`)
+      await Promise.all([loadSseStatus(), loadMcpContext()])
+    } else {
+      message.error('连接失败: ' + (res.message || '未知错误'))
+    }
+  } catch (error) {
+    const errorMsg = error.response?.data?.detail || error.message
+    message.error('连接失败: ' + errorMsg)
+  } finally {
+    connectingSseServer.value = null
+  }
+}
+
+const disconnectSseServer = async (server) => {
+  const key = `db_${server.id}`
+  disconnectingSseServer.value = key
+  
+  try {
+    const res = await mcpTestApi.disconnectSseServer(key)
+    if (res.success) {
+      message.success('服务器已断开')
+      if (testingServer.value?.id === server.id) {
+        testingServer.value = null
+      }
+      await Promise.all([loadSseStatus(), loadMcpContext()])
+    }
+  } catch (error) {
+    message.error('断开失败: ' + error.message)
+  } finally {
+    disconnectingSseServer.value = null
+  }
+}
+
+const testSseConnection = async (server) => {
+  const key = `db_${server.id}`
+  const hide = message.loading('正在测试 SSE 连接...', 0)
+  
+  try {
+    const res = await mcpTestApi.testSseConnection(key)
+    hide()
+    if (res.success) {
+      message.success(`连接正常，延迟 ${res.latency_ms}ms`)
+    } else {
+      message.error('连接异常: ' + res.message)
+    }
+  } catch (error) {
+    hide()
+    message.error('测试失败: ' + error.message)
+  }
+}
+
+const openSseTestPanel = async (server) => {
+  testingServer.value = server
+  selectedTool.value = null
+  toolResult.value = null
+  Object.keys(toolArgs).forEach(key => delete toolArgs[key])
+  
+  loadingTools.value = true
+  try {
+    const key = `db_${server.id}`
+    const res = await mcpTestApi.getSseTools(key)
+    availableTools.value = res.tools || []
+  } catch (error) {
+    message.error('加载工具列表失败: ' + error.message)
+    availableTools.value = []
+  } finally {
+    loadingTools.value = false
+  }
+}
+
 // Test panel functions
 const openTestPanel = async (server) => {
   testingServer.value = server
@@ -901,15 +1199,28 @@ const callTool = async () => {
   toolResult.value = null
   
   try {
-    // 判断是预置服务器还是自定义服务器
     let key
+    let res
+    
+    // 判断是预置服务器还是自定义服务器
     if (testingServer.value.is_preset) {
       key = testingServer.value.name === 'Context7' ? 'context7' : (testingServer.value.name === 'Everything Server' ? 'everything' : 'hefeng')
+      res = await mcpTestApi.callStdioTool(key, selectedTool.value.name, { ...toolArgs })
     } else {
+      // 自定义服务器：判断是 STDIO 还是 SSE
+      const transport = testingServer.value.transport
       key = getCustomServerKey(testingServer.value)
+      
+      if (transport === 'sse' || transport === 'http') {
+        // SSE 服务器
+        const sseKey = `db_${testingServer.value.id}`
+        res = await mcpTestApi.callSseTool(sseKey, selectedTool.value.name, { ...toolArgs })
+      } else {
+        // STDIO 服务器
+        res = await mcpTestApi.callStdioTool(key, selectedTool.value.name, { ...toolArgs })
+      }
     }
     
-    const res = await mcpTestApi.callStdioTool(key, selectedTool.value.name, { ...toolArgs })
     toolResult.value = res
     
     if (res.success) {
@@ -1160,12 +1471,128 @@ const saveServer = async () => {
     isSaving.value = false
   }
 }
+
+// ========== Roots 管理功能 ==========
+
+const openRootsDrawer = async (server) => {
+  // 确定服务器 key
+  let serverKey
+  if (server.is_preset) {
+    serverKey = server.name === 'Context7' ? 'context7' : 
+                (server.name === 'Everything Server' ? 'everything' : 
+                (server.name === '和风天气' ? 'hefeng' : null))
+  } else {
+    serverKey = `custom_${server.id}`
+  }
+  
+  if (!serverKey) {
+    message.error('无法识别服务器')
+    return
+  }
+  
+  rootsServer.value = { ...server, serverKey }
+  rootsDrawerVisible.value = true
+  await loadRoots(serverKey)
+}
+
+const loadRoots = async (serverKey) => {
+  loadingRoots.value = true
+  try {
+    const res = await mcpHostApi.getServerRoots(serverKey)
+    rootsList.value = res.roots || []
+  } catch (error) {
+    console.error('加载根目录失败:', error)
+    rootsList.value = []
+  } finally {
+    loadingRoots.value = false
+  }
+}
+
+const addRoot = async () => {
+  if (!newRootPath.value.trim()) {
+    message.warning('请输入路径')
+    return
+  }
+  
+  addingRoot.value = true
+  try {
+    await mcpHostApi.addServerRoot(
+      rootsServer.value.serverKey,
+      newRootPath.value.trim(),
+      newRootName.value.trim() || null
+    )
+    message.success('根目录添加成功')
+    newRootPath.value = ''
+    newRootName.value = ''
+    await loadRoots(rootsServer.value.serverKey)
+  } catch (error) {
+    message.error('添加失败: ' + (error.response?.data?.detail || error.message))
+  } finally {
+    addingRoot.value = false
+  }
+}
+
+const removeRoot = async (root) => {
+  Modal.confirm({
+    title: '移除根目录',
+    icon: createVNode(ExclamationCircleOutlined),
+    content: `确定要移除「${root.name || root.path}」吗？`,
+    okText: '移除',
+    okType: 'danger',
+    cancelText: '取消',
+    async onOk() {
+      try {
+        await mcpHostApi.removeServerRoot(rootsServer.value.serverKey, root.path)
+        message.success('根目录已移除')
+        await loadRoots(rootsServer.value.serverKey)
+      } catch (error) {
+        message.error('移除失败: ' + error.message)
+      }
+    }
+  })
+}
+
+const validatePathInput = async () => {
+  if (!newRootPath.value.trim()) {
+    validationResult.value = null
+    return
+  }
+  
+  validatingPath.value = true
+  try {
+    const res = await mcpHostApi.validatePath(rootsServer.value.serverKey, newRootPath.value.trim())
+    validationResult.value = res
+  } catch (error) {
+    validationResult.value = null
+  } finally {
+    validatingPath.value = false
+  }
+}
+
+const closeRootsDrawer = () => {
+  rootsDrawerVisible.value = false
+  rootsServer.value = null
+  rootsList.value = []
+  newRootPath.value = ''
+  newRootName.value = ''
+  validationResult.value = null
+}
+
+// 检查服务器是否有 roots 配置
+const hasRootsConfig = (server) => {
+  const status = server.is_preset 
+    ? stdioStatus.value[getServerKey(server)]
+    : stdioStatus.value[getCustomServerKey(server)]
+  return status?.roots_enabled || false
+}
 </script>
 
 <style lang="scss" scoped>
 .mcp-manager {
   min-height: 100vh;
   background: var(--bg-body);
+  display: flex;
+  flex-direction: column;
 }
 
 .page-header {
@@ -1348,9 +1775,16 @@ const saveServer = async () => {
   }
 }
 
+// Context Panel 展开/收起动画
+.context-panel {
+  overflow: hidden;
+}
+
 .slide-enter-active,
 .slide-leave-active {
   transition: all 0.3s ease;
+  max-height: 500px;
+  overflow: hidden;
 }
 
 .slide-enter-from,
@@ -1359,11 +1793,12 @@ const saveServer = async () => {
   max-height: 0;
   padding-top: 0;
   padding-bottom: 0;
+  overflow: hidden;
 }
 
 .page-content {
   padding: 32px 48px;
-  max-width: 1600px;
+  flex: 1;
 }
 
 .section {
@@ -1669,6 +2104,20 @@ const saveServer = async () => {
     
     &:hover:not(:disabled) {
       background: rgba(239, 68, 68, 0.2);
+    }
+  }
+  
+  &.secondary {
+    width: 36px;
+    padding: 0;
+    background: var(--bg-subtle);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    
+    &:hover:not(:disabled) {
+      background: var(--primary-light);
+      color: var(--primary);
+      border-color: var(--primary);
     }
   }
 }
@@ -2410,5 +2859,286 @@ const saveServer = async () => {
   border-top-color: white;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
+}
+
+// Roots 管理抽屉
+.roots-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 520px;
+  height: 100vh;
+  background: var(--bg-elevated);
+  border-left: 1px solid var(--border-light);
+  box-shadow: -10px 0 40px rgba(0, 0, 0, 0.1);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  
+  .drawer-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border-light);
+    
+    h3 {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text-heading);
+      margin: 0;
+      
+      svg {
+        width: 20px;
+        height: 20px;
+        color: var(--accent);
+      }
+    }
+  }
+  
+  .drawer-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+}
+
+.roots-info {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--primary-light);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 10px;
+  
+  svg {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    color: var(--primary);
+    margin-top: 2px;
+  }
+  
+  p {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+}
+
+.add-root-section, .roots-list-section {
+  h4 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-heading);
+    margin: 0 0 12px 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    
+    .count {
+      font-size: 12px;
+      padding: 2px 8px;
+      background: var(--bg-subtle);
+      color: var(--text-muted);
+      border-radius: 10px;
+    }
+  }
+}
+
+.add-root-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  
+  .form-row {
+    display: flex;
+    gap: 10px;
+    
+    .form-input {
+      flex: 1;
+      
+      &.small {
+        max-width: 150px;
+      }
+    }
+  }
+}
+
+.add-root-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 42px;
+  padding: 0 18px;
+  font-size: 13px;
+  font-weight: 500;
+  color: white;
+  background: var(--primary);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+  
+  svg {
+    width: 16px;
+    height: 16px;
+  }
+  
+  &:hover:not(:disabled) {
+    background: var(--primary-hover);
+  }
+  
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.validation-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  
+  svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+  
+  &.success {
+    background: rgba(34, 197, 94, 0.1);
+    color: var(--success);
+  }
+  
+  &.warning {
+    background: rgba(245, 158, 11, 0.1);
+    color: var(--warning);
+  }
+}
+
+.roots-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.root-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  transition: all 0.2s;
+  
+  &:hover {
+    border-color: rgba(99, 102, 241, 0.3);
+    
+    .remove-root-btn {
+      opacity: 1;
+    }
+  }
+  
+  .root-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+  }
+  
+  .root-icon {
+    width: 36px;
+    height: 36px;
+    background: var(--accent-light);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    
+    svg {
+      width: 18px;
+      height: 18px;
+      color: var(--accent);
+    }
+  }
+  
+  .root-details {
+    flex: 1;
+    min-width: 0;
+    
+    .root-name {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-heading);
+      margin-bottom: 2px;
+    }
+    
+    .root-path {
+      font-size: 12px;
+      font-family: var(--font-mono);
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    
+    .root-type {
+      display: inline-block;
+      margin-top: 4px;
+      padding: 2px 6px;
+      font-size: 10px;
+      background: var(--primary-light);
+      color: var(--primary);
+      border-radius: 4px;
+      text-transform: uppercase;
+    }
+  }
+}
+
+.remove-root-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.2s;
+  
+  svg {
+    width: 16px;
+    height: 16px;
+  }
+  
+  &:hover {
+    background: var(--error-light);
+    color: var(--error);
+  }
+}
+
+.empty-state.small svg {
+  width: 48px;
+  height: 48px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
 }
 </style>

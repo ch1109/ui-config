@@ -259,7 +259,8 @@ function formatTime(dateStr) {
 <style scoped>
 .mcp-host-page {
   display: flex;
-  height: 100vh;
+  min-height: 100vh;
+  height: 100%;
   background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 100%);
 }
 
@@ -408,10 +409,11 @@ function formatTime(dateStr) {
 }
 
 /* 主内容 */
-.main-content {
+.mcp-host-page > .main-content {
   flex: 1;
   padding: 20px;
   overflow: hidden;
+  min-height: 0;
 }
 
 /* 审计日志弹窗 */

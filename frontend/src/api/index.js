@@ -374,6 +374,36 @@ export const mcpHostApi = {
   getSession: (sessionId) => api.get(`/host/sessions/${sessionId}`),
   deleteSession: (sessionId) => api.delete(`/host/sessions/${sessionId}`),
   
+  // ========== Roots 管理（工作区目录）==========
+  // 获取服务器的根目录列表
+  getServerRoots: (serverKey) => api.get(`/host/servers/${serverKey}/roots`),
+  
+  // 配置服务器的根目录（替换所有）
+  configureServerRoots: (serverKey, roots, strictMode = true) => 
+    api.put(`/host/servers/${serverKey}/roots`, { roots, strict_mode: strictMode }),
+  
+  // 添加根目录
+  addServerRoot: (serverKey, path, name = null, type = 'custom') => 
+    api.post(`/host/servers/${serverKey}/roots`, { path, name, type }),
+  
+  // 移除根目录
+  removeServerRoot: (serverKey, path) => 
+    api.delete(`/host/servers/${serverKey}/roots`, { params: { path } }),
+  
+  // 验证文件路径
+  validatePath: (serverKey, path) => 
+    api.post(`/host/servers/${serverKey}/validate-path`, { path }),
+  
+  // 获取 Roots 服务状态
+  getRootsStatus: () => api.get('/host/roots/status'),
+  
+  // 全局根目录管理
+  getGlobalRoots: () => api.get('/host/roots/global'),
+  addGlobalRoot: (path, name = null, type = 'custom') => 
+    api.post('/host/roots/global', { path, name, type }),
+  removeGlobalRoot: (path) => 
+    api.delete('/host/roots/global', { params: { path } }),
+  
   // ========== 对话（ReAct 循环）==========
   // 流式对话
   chatStream: (sessionId, message, config, onEvent, onComplete, onError) => {
@@ -559,7 +589,37 @@ export const mcpHostApi = {
     api.get('/host/audit-log', { params: { session_id: sessionId, limit } }),
   
   // ========== 健康检查 ==========
-  health: () => api.get('/host/health')
+  health: () => api.get('/host/health'),
+  
+  // ========== Sampling 管理（服务端请求 LLM）==========
+  // 获取 Sampling 安全配置
+  getSamplingConfig: () => api.get('/host/sampling/config'),
+  
+  // 更新 Sampling 安全配置
+  updateSamplingConfig: (config) => api.put('/host/sampling/config', config),
+  
+  // 获取 Sampling 服务状态
+  getSamplingStatus: () => api.get('/host/sampling/status'),
+  
+  // 获取待审核的 Sampling 请求列表
+  getSamplingRequests: () => api.get('/host/sampling/requests'),
+  
+  // 批准 Sampling 请求
+  approveSamplingRequest: (requestId, modifiedParams = null, llmConfig = null) => 
+    api.post(`/host/sampling/requests/${requestId}/approve`, { 
+      modified_params: modifiedParams,
+      llm_config: llmConfig
+    }),
+  
+  // 拒绝 Sampling 请求
+  rejectSamplingRequest: (requestId, reason = '用户拒绝了此请求') => 
+    api.post(`/host/sampling/requests/${requestId}/reject`, { reason }),
+  
+  // 清理过期的 Sampling 请求
+  cleanupSamplingRequests: () => api.post('/host/sampling/cleanup'),
+  
+  // 获取支持 Sampling 的服务器列表
+  getSamplingServers: () => api.get('/host/sampling/servers')
 }
 
 // MCP Test API - 用于测试 MCP 功能
@@ -669,7 +729,62 @@ export const mcpTestApi = {
   }),
   
   // 批量测试 stdio 服务器
-  batchTestStdio: (serverKey) => api.post(`/mcp-test/stdio/${serverKey}/batch-test`)
+  batchTestStdio: (serverKey) => api.post(`/mcp-test/stdio/${serverKey}/batch-test`),
+  
+  // ========== SSE MCP 服务器 API ==========
+  
+  // 获取所有 SSE 服务器状态
+  getSseStatus: () => api.get('/mcp-test/sse/status'),
+  
+  // 连接 SSE 服务器
+  connectSseServer: (config) => api.post('/mcp-test/sse/connect', config),
+  
+  // 从数据库配置连接 SSE 服务器
+  connectSseServerFromDb: (serverId) => api.post(`/mcp-test/sse/connect-db/${serverId}`),
+  
+  // 断开 SSE 服务器连接
+  disconnectSseServer: (serverKey) => api.post(`/mcp-test/sse/disconnect/${serverKey}`),
+  
+  // 重新连接 SSE 服务器
+  reconnectSseServer: (serverKey) => api.post(`/mcp-test/sse/reconnect/${serverKey}`),
+  
+  // 测试 SSE 连接健康状态
+  testSseConnection: (serverKey) => api.get(`/mcp-test/sse/test/${serverKey}`),
+  
+  // 获取 SSE 服务器的工具列表
+  getSseTools: (serverKey) => api.get(`/mcp-test/sse/${serverKey}/tools`),
+  
+  // 调用 SSE 服务器的工具
+  callSseTool: (serverKey, toolName, args) => api.post('/mcp-test/sse/tools/call', {
+    server_key: serverKey,
+    tool_name: toolName,
+    arguments: args
+  }),
+  
+  // 获取 SSE 服务器的资源列表
+  getSseResources: (serverKey) => api.get(`/mcp-test/sse/${serverKey}/resources`),
+  
+  // 读取 SSE 服务器的资源
+  readSseResource: (serverKey, uri) => api.post('/mcp-test/sse/resources/read', {
+    server_key: serverKey,
+    uri: uri
+  }),
+  
+  // 获取 SSE 服务器的提示模板列表
+  getSsePrompts: (serverKey) => api.get(`/mcp-test/sse/${serverKey}/prompts`),
+  
+  // 获取 SSE 服务器的提示模板内容
+  getSsePrompt: (serverKey, name, args) => api.post('/mcp-test/sse/prompts/get', {
+    server_key: serverKey,
+    name: name,
+    arguments: args
+  }),
+  
+  // 批量测试 SSE 服务器
+  batchTestSse: (serverKey) => api.post(`/mcp-test/sse/${serverKey}/batch-test`),
+  
+  // 获取所有 SSE 服务器的工具（聚合）
+  getAllSseTools: () => api.get('/mcp-test/sse/all-tools')
 }
 
 export default api

@@ -68,16 +68,22 @@ PRESET_MCP_SERVERS = {
 class MCPServerConfig(BaseModel):
     """MCP 服务器配置"""
     name: str
-    transport: str = "http"  # http 或 stdio
-    # HTTP 类型字段
+    transport: str = "http"  # http, stdio 或 sse
+    # HTTP/SSE 类型字段
     server_url: Optional[str] = None
     health_check_path: Optional[str] = "/health"
+    # SSE 特定字段
+    sse_endpoint: Optional[str] = "/sse"  # SSE 事件流端点
+    message_endpoint: Optional[str] = "/message"  # 消息发送端点
+    auto_reconnect: Optional[bool] = True  # 是否自动重连
+    max_reconnect_attempts: Optional[int] = 5  # 最大重连次数
+    custom_headers: Optional[Dict[str, str]] = None  # 自定义请求头
     # STDIO 类型字段
     command: Optional[str] = None  # 如 npx, node
     args: Optional[List[str]] = []  # 如 ['-y', 'wttr-mcp-server@latest']
     env: Optional[Dict[str, str]] = {}  # 环境变量
     # 通用字段
-    auth_type: Optional[str] = "none"  # none, api_key, oauth
+    auth_type: Optional[str] = "none"  # none, bearer, api_key, custom
     auth_config: Optional[Dict[str, str]] = None
     tools: List[str] = []
     description: Optional[str] = None
@@ -300,9 +306,10 @@ async def add_mcp_config(
     """
     通过表单/代码编辑器方式添加 MCP 配置
     
-    支持 HTTP 和 STDIO 两种传输类型：
-    - HTTP: 需要 server_url
-    - STDIO: 需要 command 和 args
+    支持三种传输类型：
+    - HTTP: 需要 server_url（REST API）
+    - SSE: 需要 server_url（Server-Sent Events）
+    - STDIO: 需要 command 和 args（本地进程）
     
     对应需求: REQ-M6-008
     """
@@ -312,14 +319,17 @@ async def add_mcp_config(
     if transport == "http":
         if not config.server_url:
             raise HTTPException(status_code=400, detail="HTTP 类型需要提供 server_url")
+    elif transport == "sse":
+        if not config.server_url:
+            raise HTTPException(status_code=400, detail="SSE 类型需要提供 server_url")
     elif transport == "stdio":
         if not config.command:
             raise HTTPException(status_code=400, detail="STDIO 类型需要提供 command")
     else:
-        raise HTTPException(status_code=400, detail=f"不支持的传输类型: {transport}")
+        raise HTTPException(status_code=400, detail=f"不支持的传输类型: {transport}，可选: http, sse, stdio")
     
     # REQ-M6-013: 检查是否重复（根据类型使用不同的唯一标识）
-    if transport == "http":
+    if transport in ["http", "sse"]:
         result = await db.execute(
             select(MCPServer).where(
                 MCPServer.server_url == config.server_url,
@@ -345,7 +355,7 @@ async def add_mcp_config(
             "existing_id": existing.id
         }
     
-    # 连通性测试（仅 HTTP 类型）
+    # 连通性测试（仅 HTTP 类型，SSE 类型需要手动连接）
     connectivity_ok = True
     if transport == "http":
         connectivity_ok = await test_server_connectivity(
@@ -357,9 +367,15 @@ async def add_mcp_config(
     server = MCPServer(
         name=config.name,
         transport=transport,
-        # HTTP 字段
-        server_url=config.server_url if transport == "http" else None,
+        # HTTP/SSE 字段
+        server_url=config.server_url if transport in ["http", "sse"] else None,
         health_check_path=config.health_check_path or "/health" if transport == "http" else None,
+        # SSE 特定字段
+        sse_endpoint=config.sse_endpoint or "/sse" if transport == "sse" else None,
+        message_endpoint=config.message_endpoint or "/message" if transport == "sse" else None,
+        auto_reconnect=config.auto_reconnect if transport == "sse" else None,
+        max_reconnect_attempts=config.max_reconnect_attempts or 5 if transport == "sse" else None,
+        custom_headers=config.custom_headers if transport == "sse" else None,
         # STDIO 字段
         command=config.command if transport == "stdio" else None,
         args=config.args or [] if transport == "stdio" else None,
@@ -369,7 +385,7 @@ async def add_mcp_config(
         auth_type=config.auth_type or "none",
         auth_config=config.auth_config,
         description=config.description,
-        status="enabled" if connectivity_ok else ("disabled" if transport == "stdio" else "error")
+        status="enabled" if connectivity_ok else ("disabled" if transport in ["stdio", "sse"] else "error")
     )
     db.add(server)
     await db.commit()
@@ -385,6 +401,8 @@ async def add_mcp_config(
         response["connectivity"] = connectivity_ok
         if not connectivity_ok:
             response["warning"] = "服务器连接失败，配置已保存但可能无法正常使用"
+    elif transport == "sse":
+        response["message"] = "SSE 服务器配置已保存，请在列表中点击「连接」按钮建立连接"
     else:
         response["message"] = "STDIO 服务器配置已保存，请在列表中启动服务器"
     

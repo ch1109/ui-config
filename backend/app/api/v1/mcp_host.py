@@ -70,6 +70,13 @@ class ConfirmationRequest(BaseModel):
     reason: Optional[str] = None
 
 
+class RootConfig(BaseModel):
+    """根目录配置"""
+    path: str = Field(..., description="根目录路径")
+    name: Optional[str] = Field(None, description="根目录名称")
+    type: str = Field("custom", description="根目录类型: project, workspace, resource, custom")
+
+
 class SSEServerConfig(BaseModel):
     """SSE 服务器配置"""
     server_key: str
@@ -78,6 +85,7 @@ class SSEServerConfig(BaseModel):
     message_endpoint: str = "/message"
     auth_token: Optional[str] = None
     auth_type: str = "bearer"
+    roots: Optional[List[RootConfig]] = Field(None, description="根目录配置")
 
 
 class ToolCallRequest(BaseModel):
@@ -86,6 +94,17 @@ class ToolCallRequest(BaseModel):
     tool_name: str
     arguments: Dict[str, Any] = {}
     skip_confirmation: bool = False
+
+
+class ConfigureRootsRequest(BaseModel):
+    """配置根目录请求"""
+    roots: List[RootConfig] = Field(..., description="根目录配置列表")
+    strict_mode: bool = Field(True, description="是否启用严格模式")
+
+
+class ValidatePathRequest(BaseModel):
+    """路径验证请求"""
+    path: str = Field(..., description="要验证的文件路径")
 
 
 # ==================== 会话管理 ====================
@@ -404,6 +423,14 @@ async def list_servers():
     }
 
 
+class StartStdioServerRequest(BaseModel):
+    """启动 STDIO 服务器请求"""
+    command: str = Field(..., description="启动命令")
+    args: List[str] = Field(default=[], description="命令参数")
+    env: Dict[str, str] = Field(default={}, description="环境变量")
+    roots: Optional[List[RootConfig]] = Field(None, description="根目录配置")
+
+
 @router.post("/servers/stdio/{server_key}/start")
 async def start_stdio_server(
     request: Request,
@@ -412,7 +439,11 @@ async def start_stdio_server(
     args: List[str] = Query(default=[]),
     env: Dict[str, str] = Body(default={})
 ):
-    """启动 Stdio MCP 服务器"""
+    """
+    启动 Stdio MCP 服务器
+    
+    支持可选的 roots 配置来限制服务器的文件访问范围
+    """
     def _mask_args(raw_args: List[str]) -> List[str]:
         masked = []
         for item in raw_args:
@@ -422,6 +453,8 @@ async def start_stdio_server(
                 masked.append(item)
         return masked
 
+    roots_config = None
+    
     # 如果 query 未提供参数，尝试从 JSON body 读取（兼容旧调用方式）
     if command is None and not args:
         try:
@@ -434,15 +467,24 @@ async def start_stdio_server(
                 body_env = body.get("env")
                 if isinstance(body_env, dict):
                     env = body_env
+            # 解析 roots 配置
+            if isinstance(body, dict):
+                body_roots = body.get("roots")
+                if isinstance(body_roots, list):
+                    roots_config = [
+                        {"path": r.get("path"), "name": r.get("name"), "type": r.get("type", "custom")}
+                        for r in body_roots if isinstance(r, dict) and r.get("path")
+                    ]
         except Exception:
             pass
 
     logger.info(
-        "Start stdio server request: server_key=%s command=%s args=%s env_keys=%s query=%s",
+        "Start stdio server request: server_key=%s command=%s args=%s env_keys=%s roots=%s query=%s",
         server_key,
         command,
         _mask_args(args),
         sorted(list(env.keys())) if isinstance(env, dict) else [],
+        len(roots_config) if roots_config else 0,
         dict(request.query_params)
     )
 
@@ -453,13 +495,14 @@ async def start_stdio_server(
         server_key=server_key,
         command=command,
         args=args,
-        env=env
+        env=env,
+        roots_config=roots_config
     )
     
     if not success:
         raise HTTPException(status_code=500, detail=message)
     
-    return {"success": True, "message": message}
+    return {"success": True, "message": message, "roots_configured": bool(roots_config)}
 
 
 @router.post("/servers/stdio/{server_key}/stop")
@@ -472,20 +515,33 @@ async def stop_stdio_server(server_key: str):
 
 @router.post("/servers/sse/connect")
 async def connect_sse_server(config: SSEServerConfig):
-    """连接 SSE MCP 服务器"""
+    """
+    连接 SSE MCP 服务器
+    
+    支持可选的 roots 配置来限制服务器的文件访问范围
+    """
+    # 转换 roots 配置
+    roots_config = None
+    if config.roots:
+        roots_config = [
+            {"path": r.path, "name": r.name, "type": r.type}
+            for r in config.roots
+        ]
+    
     success, message = await sse_mcp_client.connect(
         server_key=config.server_key,
         base_url=config.base_url,
         sse_endpoint=config.sse_endpoint,
         message_endpoint=config.message_endpoint,
         auth_token=config.auth_token,
-        auth_type=config.auth_type
+        auth_type=config.auth_type,
+        roots_config=roots_config
     )
     
     if not success:
         raise HTTPException(status_code=500, detail=message)
     
-    return {"success": True, "message": message}
+    return {"success": True, "message": message, "roots_configured": bool(roots_config)}
 
 
 @router.post("/servers/sse/{server_key}/disconnect")
@@ -548,6 +604,396 @@ async def update_risk_policy(
     return {"success": True, "policy": await get_risk_policy()}
 
 
+# ==================== Roots 管理（工作区目录） ====================
+
+@router.get("/servers/{server_key}/roots")
+async def get_server_roots(server_key: str):
+    """
+    获取服务器的根目录列表
+    
+    根目录定义了 MCP 服务器可以访问的文件系统范围
+    """
+    from app.services.roots_service import roots_service
+    
+    roots = roots_service.get_session_roots(server_key)
+    
+    return {
+        "server_key": server_key,
+        "count": len(roots),
+        "roots": [
+            {
+                "uri": root.uri,
+                "name": root.name,
+                "path": root.path,
+                "type": root.root_type.value
+            }
+            for root in roots
+        ]
+    }
+
+
+@router.put("/servers/{server_key}/roots")
+async def configure_server_roots(server_key: str, request: ConfigureRootsRequest):
+    """
+    配置服务器的根目录
+    
+    这将替换现有的所有根目录配置
+    """
+    from app.services.roots_service import roots_service
+    
+    # 转换为内部格式
+    roots_config = [
+        {"path": r.path, "name": r.name, "type": r.type}
+        for r in request.roots
+    ]
+    
+    config = await roots_service.configure_session_roots(
+        server_key,
+        roots_config,
+        strict_mode=request.strict_mode
+    )
+    
+    # 发送 roots/list_changed 通知
+    if stdio_mcp_manager.is_running(server_key):
+        await stdio_mcp_manager.send_roots_list_changed(server_key)
+    elif sse_mcp_client.is_connected(server_key):
+        await sse_mcp_client.send_roots_list_changed(server_key)
+    
+    return {
+        "success": True,
+        "server_key": server_key,
+        "roots_count": len(config.roots),
+        "strict_mode": config.strict_mode
+    }
+
+
+@router.post("/servers/{server_key}/roots")
+async def add_server_root(server_key: str, root: RootConfig):
+    """
+    向服务器添加根目录
+    """
+    from app.services.roots_service import roots_service
+    from app.services.roots_service import RootType
+    
+    new_root = await roots_service.add_session_root(
+        server_key,
+        root.path,
+        root.name,
+        RootType(root.type)
+    )
+    
+    # 发送 roots/list_changed 通知
+    if stdio_mcp_manager.is_running(server_key):
+        await stdio_mcp_manager.send_roots_list_changed(server_key)
+    elif sse_mcp_client.is_connected(server_key):
+        await sse_mcp_client.send_roots_list_changed(server_key)
+    
+    return {
+        "success": True,
+        "root": {
+            "uri": new_root.uri,
+            "name": new_root.name,
+            "path": new_root.path,
+            "type": new_root.root_type.value
+        }
+    }
+
+
+@router.delete("/servers/{server_key}/roots")
+async def remove_server_root(server_key: str, path: str = Query(..., description="要移除的根目录路径")):
+    """
+    从服务器移除根目录
+    """
+    from app.services.roots_service import roots_service
+    
+    success = await roots_service.remove_session_root(server_key, path)
+    
+    if success:
+        # 发送 roots/list_changed 通知
+        if stdio_mcp_manager.is_running(server_key):
+            await stdio_mcp_manager.send_roots_list_changed(server_key)
+        elif sse_mcp_client.is_connected(server_key):
+            await sse_mcp_client.send_roots_list_changed(server_key)
+    
+    return {
+        "success": success,
+        "message": "根目录已移除" if success else "未找到指定的根目录"
+    }
+
+
+@router.post("/servers/{server_key}/validate-path")
+async def validate_path(server_key: str, request: ValidatePathRequest):
+    """
+    验证文件路径是否在允许的根目录范围内
+    
+    返回验证结果和匹配的根目录（如果有）
+    """
+    from app.services.roots_service import roots_service
+    
+    result = roots_service.validate_path(server_key, request.path)
+    
+    return {
+        "allowed": result.status.value == "allowed",
+        "status": result.status.value,
+        "path": result.path,
+        "message": result.message,
+        "matched_root": {
+            "uri": result.matched_root.uri,
+            "name": result.matched_root.name,
+            "path": result.matched_root.path
+        } if result.matched_root else None
+    }
+
+
+@router.get("/roots/status")
+async def get_roots_status():
+    """
+    获取 Roots 服务的整体状态
+    
+    包括全局根目录和所有会话的根目录配置
+    """
+    from app.services.roots_service import roots_service
+    
+    return roots_service.get_status()
+
+
+@router.post("/roots/global")
+async def add_global_root(root: RootConfig):
+    """
+    添加全局根目录
+    
+    全局根目录会应用于所有 MCP 服务器
+    """
+    from app.services.roots_service import roots_service
+    from app.services.roots_service import RootType
+    
+    new_root = roots_service.add_global_root(
+        root.path,
+        root.name,
+        RootType(root.type)
+    )
+    
+    return {
+        "success": True,
+        "root": {
+            "uri": new_root.uri,
+            "name": new_root.name,
+            "path": new_root.path,
+            "type": new_root.root_type.value
+        }
+    }
+
+
+@router.delete("/roots/global")
+async def remove_global_root(path: str = Query(..., description="要移除的全局根目录路径")):
+    """
+    移除全局根目录
+    """
+    from app.services.roots_service import roots_service
+    
+    success = roots_service.remove_global_root(path)
+    
+    return {
+        "success": success,
+        "message": "全局根目录已移除" if success else "未找到指定的全局根目录"
+    }
+
+
+@router.get("/roots/global")
+async def get_global_roots():
+    """
+    获取全局根目录列表
+    """
+    from app.services.roots_service import roots_service
+    
+    roots = roots_service.get_global_roots()
+    
+    return {
+        "count": len(roots),
+        "roots": [
+            {
+                "uri": root.uri,
+                "name": root.name,
+                "path": root.path,
+                "type": root.root_type.value
+            }
+            for root in roots
+        ]
+    }
+
+
+# ==================== Sampling 管理（服务端请求 LLM） ====================
+
+class SamplingConfigRequest(BaseModel):
+    """Sampling 安全配置请求"""
+    max_tokens_limit: Optional[int] = Field(None, description="最大允许的 max_tokens 值")
+    default_max_tokens: Optional[int] = Field(None, description="默认 max_tokens")
+    rate_limit_per_minute: Optional[int] = Field(None, description="每分钟最大请求数")
+    rate_limit_per_server: Optional[int] = Field(None, description="每个 Server 每分钟最大请求数")
+    enable_content_filter: Optional[bool] = Field(None, description="是否启用内容过滤")
+    blocked_keywords: Optional[List[str]] = Field(None, description="禁止的关键词列表")
+    require_approval: Optional[bool] = Field(None, description="是否需要人工审核")
+    auto_approve_threshold: Optional[int] = Field(None, description="自动批准的 token 阈值")
+    approval_timeout_seconds: Optional[int] = Field(None, description="审核超时时间（秒）")
+    allowed_servers: Optional[List[str]] = Field(None, description="允许使用 Sampling 的 Server 列表")
+    blocked_servers: Optional[List[str]] = Field(None, description="禁止使用 Sampling 的 Server 列表")
+
+
+class ApproveSamplingRequest(BaseModel):
+    """批准 Sampling 请求"""
+    modified_params: Optional[Dict[str, Any]] = Field(None, description="用户修改后的参数")
+    llm_config: Optional[Dict[str, Any]] = Field(None, description="LLM 配置")
+
+
+class RejectSamplingRequest(BaseModel):
+    """拒绝 Sampling 请求"""
+    reason: str = Field("用户拒绝了此请求", description="拒绝原因")
+
+
+@router.get("/sampling/config")
+async def get_sampling_config():
+    """
+    获取 Sampling 安全配置
+    
+    Sampling 允许 MCP Server 请求 Host 调用 LLM。
+    安全配置用于控制和限制这些请求。
+    """
+    return mcp_host_service.get_sampling_config()
+
+
+@router.put("/sampling/config")
+async def update_sampling_config(request: SamplingConfigRequest):
+    """
+    更新 Sampling 安全配置
+    
+    可配置的选项：
+    - max_tokens_limit: 单次请求允许的最大 token 数
+    - rate_limit_per_minute: 全局速率限制
+    - rate_limit_per_server: 每个 Server 的速率限制
+    - require_approval: 是否需要人工审核
+    - blocked_keywords: 内容过滤关键词
+    - allowed_servers / blocked_servers: Server 白名单/黑名单
+    """
+    config = request.model_dump(exclude_none=True)
+    mcp_host_service.update_sampling_config(config)
+    
+    return {
+        "success": True,
+        "config": mcp_host_service.get_sampling_config()
+    }
+
+
+@router.get("/sampling/status")
+async def get_sampling_status():
+    """
+    获取 Sampling 服务状态
+    
+    返回当前配置、待审核请求数、速率限制状态等
+    """
+    return mcp_host_service.get_sampling_status()
+
+
+@router.get("/sampling/requests")
+async def get_pending_sampling_requests():
+    """
+    获取待审核的 Sampling 请求列表
+    
+    当 require_approval 为 true 且请求 token 数超过 auto_approve_threshold 时，
+    请求会进入待审核队列。
+    """
+    requests = mcp_host_service.get_pending_sampling_requests()
+    
+    return {
+        "count": len(requests),
+        "requests": requests
+    }
+
+
+@router.post("/sampling/requests/{request_id}/approve")
+async def approve_sampling_request(
+    request_id: str,
+    request: ApproveSamplingRequest = Body(default=ApproveSamplingRequest())
+):
+    """
+    批准 Sampling 请求
+    
+    批准后将调用 LLM 并将结果返回给发起请求的 MCP Server。
+    可以在批准时修改请求参数（如 max_tokens、temperature 等）。
+    """
+    result = await mcp_host_service.approve_sampling_request(
+        request_id,
+        modified_params=request.modified_params,
+        llm_config=request.llm_config
+    )
+    
+    if "error" in result:
+        raise HTTPException(
+            status_code=400 if result["error"].get("code") == -32602 else 500,
+            detail=result["error"].get("message", "处理请求时发生错误")
+        )
+    
+    return {
+        "success": True,
+        "result": result.get("result")
+    }
+
+
+@router.post("/sampling/requests/{request_id}/reject")
+async def reject_sampling_request(
+    request_id: str,
+    request: RejectSamplingRequest = Body(default=RejectSamplingRequest())
+):
+    """
+    拒绝 Sampling 请求
+    
+    拒绝后会向发起请求的 MCP Server 返回错误响应。
+    """
+    result = await mcp_host_service.reject_sampling_request(
+        request_id,
+        reason=request.reason
+    )
+    
+    if "error" not in result:
+        raise HTTPException(status_code=500, detail="拒绝操作应返回错误响应")
+    
+    return {
+        "success": True,
+        "message": f"请求已拒绝: {request.reason}"
+    }
+
+
+@router.post("/sampling/cleanup")
+async def cleanup_expired_sampling_requests():
+    """
+    清理过期的 Sampling 请求
+    
+    超过 approval_timeout_seconds 的请求会被自动标记为过期。
+    调用此接口可以手动触发清理。
+    """
+    expired_ids = await mcp_host_service.cleanup_expired_sampling_requests()
+    
+    return {
+        "success": True,
+        "expired_count": len(expired_ids),
+        "expired_ids": expired_ids
+    }
+
+
+@router.get("/sampling/servers")
+async def get_servers_with_sampling():
+    """
+    获取所有启用了 Sampling 能力的服务器
+    
+    返回支持 Sampling 的 MCP Server 列表及其状态
+    """
+    servers = mcp_host_service.get_servers_with_sampling()
+    
+    return {
+        "count": len(servers),
+        "servers": servers
+    }
+
+
 # ==================== 健康检查 ====================
 
 @router.get("/health")
@@ -563,11 +1009,26 @@ async def health_check():
         if s.state.value == "connected"
     ])
     
+    # 获取 roots 服务状态
+    from app.services.roots_service import roots_service
+    roots_status = roots_service.get_status()
+    
+    # 获取 sampling 服务状态
+    sampling_status = mcp_host_service.get_sampling_status()
+    
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "active_sessions": len(mcp_host_service.sessions),
         "connected_stdio_servers": stdio_count,
         "connected_sse_servers": sse_count,
-        "pending_confirmations": len(human_in_loop_service.pending_requests)
+        "pending_confirmations": len(human_in_loop_service.pending_requests),
+        "roots": {
+            "global_roots_count": len(roots_status.get("global_roots", [])),
+            "session_roots_count": len(roots_status.get("sessions", {}))
+        },
+        "sampling": {
+            "enabled": sampling_status.get("enabled", False),
+            "pending_requests": sampling_status.get("pending_requests_count", 0)
+        }
     }

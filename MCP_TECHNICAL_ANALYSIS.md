@@ -1,9 +1,10 @@
 # MCP 功能技术分析文档
 
-> **版本**: v1.0  
-> **生成日期**: 2026-01-19  
+> **版本**: v1.1  
+> **更新日期**: 2026-01-19  
 > **文档类型**: 面向技术领导的产品技术文档  
-> **适用范围**: UI Config 智能配置系统 MCP 功能模块
+> **适用范围**: UI Config 智能配置系统 MCP 功能模块  
+> **状态**: 功能开发完成，通过 API 自测验证
 
 ---
 
@@ -44,12 +45,13 @@ MCP（Model Context Protocol）是 Anthropic 发布的开放标准协议，本�
 ├── 工具风险评估与分级
 ├── 流式响应（SSE）
 ├── 审计日志
-└── 前端管理界面
+├── 前端管理界面
+├── MCP Roots 能力（工作区管理）✅ 完整实现
+├── MCP Sampling 能力（服务端请求 LLM）✅ 完整实现
+└── Sampling 管理前端页面 ✅ 完整实现
 
-⚠️ 功能边界
-├── 不支持 MCP Sampling 能力（服务端请求 LLM）
-├── 不支持 MCP Roots 能力（工作区管理）
-└── SSE 远程服务器尚无实际业务接入
+⚠️ 功能边界（待验证）
+└── SSE 远程服务器尚无实际业务接入（框架已完成，需实际远程 MCP 服务器测试）
 ```
 
 ### 1.3 预置 MCP 服务器
@@ -89,6 +91,8 @@ graph TB
         SVC2[ReActEngine<br/>推理行动引擎]
         SVC3[HumanInLoopService<br/>人机回环服务]
         SVC4[MCPToolsService<br/>工具管理服务]
+        SVC5[RootsService<br/>工作区管理]
+        SVC6[SamplingService<br/>服务端 LLM 请求]
     end
 
     subgraph 传输层["传输层"]
@@ -139,6 +143,8 @@ graph TB
 | **ReAct 引擎** | `services/react_engine.py` | LLM 调用、工具解析、循环控制 |
 | **人机回环服务** | `services/human_in_loop.py` | 确认请求管理、超时处理、审计日志 |
 | **工具服务** | `services/mcp_tools_service.py` | 工具信息聚合、格式转换 |
+| **Roots 服务** | `services/roots_service.py` | 工作区目录管理、路径验证、变更通知 |
+| **Sampling 服务** | `services/sampling_service.py` | 服务端 LLM 请求、安全策略、人工审核 |
 | **数据模型** | `models/mcp_server.py` | SQLAlchemy 模型定义 |
 
 ### 2.3 技术栈和关键依赖
@@ -602,7 +608,204 @@ class MCPServer(Base):
 
 ---
 
-### 3.7 前端组件
+### 3.7 MCP Roots 服务（工作区管理）
+
+#### 功能描述
+
+Roots 是 MCP 协议中的安全机制，允许客户端向服务器声明可操作的目录范围。服务器应该只在这些根目录范围内进行文件操作。
+
+#### 实现方式
+
+**关键代码路径**: `backend/app/services/roots_service.py`
+
+**核心数据结构**:
+
+```python
+@dataclass
+class Root:
+    """根目录定义"""
+    uri: str                           # file:// 协议的 URI
+    name: Optional[str] = None         # 人类可读名称
+    root_type: RootType = RootType.CUSTOM  # 目录类型
+
+@dataclass
+class RootsConfig:
+    """Roots 配置"""
+    roots: List[Root]                  # 根目录列表
+    strict_mode: bool = True           # 是否启用严格模式
+```
+
+**功能特性**:
+
+| 特性 | 说明 |
+|------|------|
+| 全局根目录 | 应用于所有 MCP 服务器的共享目录 |
+| 会话级根目录 | 每个 MCP 服务器独立配置 |
+| 路径验证 | 验证文件路径是否在根目录范围内 |
+| 变更通知 | 支持 `roots/list_changed` 通知 |
+| 严格模式 | 未配置根目录时拒绝所有路径 |
+
+**API 端点**:
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/v1/host/servers/{key}/roots` | GET | 获取服务器根目录列表 |
+| `/api/v1/host/servers/{key}/roots` | PUT | 配置服务器根目录 |
+| `/api/v1/host/servers/{key}/roots` | POST | 添加根目录 |
+| `/api/v1/host/servers/{key}/roots` | DELETE | 移除根目录 |
+| `/api/v1/host/servers/{key}/validate-path` | POST | 验证路径权限 |
+| `/api/v1/host/roots/global` | GET/POST/DELETE | 全局根目录管理 |
+| `/api/v1/host/roots/status` | GET | Roots 服务状态 |
+
+#### 核心技术点
+
+1. **路径验证机制**
+   - 使用 `pathlib.Path` 检查路径父子关系
+   - 自动从工具参数中提取可能的文件路径
+   - 支持常见路径参数名（path, file, source, target 等）
+
+2. **与工具调用集成**
+   - 在 `prepare_tool_call` 时验证路径
+   - 路径验证失败时自动提升风险等级为 CRITICAL
+   - 需要人工确认才能执行
+
+3. **MCP 协议支持**
+   - 在 `initialize` 时声明 `capabilities.roots.listChanged: true`
+   - 根目录变更时发送 `notifications/roots/list_changed`
+   - 支持处理服务器的 `roots/list` 请求
+
+```python
+# 路径验证示例
+result = roots_service.validate_path("server_key", "/project/src/main.py")
+# 返回: ValidationResult(status=ALLOWED, matched_root=Root(...))
+```
+
+---
+
+### 3.8 MCP Sampling 服务（服务端请求 LLM）
+
+#### 功能描述
+
+Sampling 是 MCP 协议中的反向调用机制，允许 MCP Server 请求 Host 调用 LLM。这使得 MCP Server 可以在处理复杂任务时获得 AI 能力支持，而无需自己持有 LLM API 密钥。
+
+#### 实现方式
+
+**关键代码路径**: `backend/app/services/sampling_service.py`
+
+**核心数据结构**:
+
+```python
+@dataclass
+class SamplingRequest:
+    """Sampling 请求"""
+    id: str                                    # 请求 ID
+    server_key: str                            # 发起请求的 MCP Server
+    messages: List[SamplingMessage]            # 消息历史
+    max_tokens: int                            # 最大 token 数（必填）
+    system_prompt: Optional[str] = None        # 系统提示词
+    model_preferences: ModelPreferences        # 模型偏好
+    temperature: Optional[float] = None        # 温度
+    approval_status: SamplingApprovalStatus    # 审核状态
+
+@dataclass
+class SamplingSecurityConfig:
+    """安全配置"""
+    max_tokens_limit: int = 4096              # 最大允许的 max_tokens
+    rate_limit_per_minute: int = 60           # 全局速率限制
+    rate_limit_per_server: int = 10           # 每 Server 速率限制
+    require_approval: bool = False            # 是否需要人工审核
+    blocked_keywords: List[str] = []          # 内容过滤关键词
+    allowed_servers: List[str] = []           # Server 白名单
+    blocked_servers: List[str] = []           # Server 黑名单
+```
+
+**功能特性**:
+
+| 特性 | 说明 |
+|------|------|
+| 安全策略 | Token 限制、速率限制、内容过滤、Server 权限 |
+| 人工审核 | 高 Token 请求可配置为需要人工批准 |
+| 自动批准 | 低风险请求自动通过 |
+| 多 LLM | 支持 OpenAI、Anthropic、智谱 |
+| 过期清理 | 自动清理超时的待审核请求 |
+
+**请求处理流程**:
+
+```mermaid
+sequenceDiagram
+    participant Server as MCP Server
+    participant Manager as STDIO/SSE Manager
+    participant Sampling as SamplingService
+    participant LLM as LLM API
+    participant User as 用户
+
+    Server->>Manager: sampling/createMessage
+    Manager->>Sampling: handle_sampling_request()
+    Sampling->>Sampling: 验证请求（权限、速率、Token、内容）
+    
+    alt 自动批准
+        Sampling->>LLM: 调用 LLM
+        LLM-->>Sampling: 返回响应
+        Sampling-->>Manager: 返回结果
+        Manager-->>Server: JSON-RPC 响应
+    else 需要人工审核
+        Sampling-->>User: 推送审核请求
+        User->>Sampling: 批准/拒绝
+        alt 批准
+            Sampling->>LLM: 调用 LLM
+            LLM-->>Sampling: 返回响应
+            Sampling-->>Manager: 返回结果
+        else 拒绝
+            Sampling-->>Manager: 返回错误
+        end
+        Manager-->>Server: JSON-RPC 响应
+    end
+```
+
+**API 端点**:
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/v1/host/sampling/config` | GET | 获取安全配置 |
+| `/api/v1/host/sampling/config` | PUT | 更新安全配置 |
+| `/api/v1/host/sampling/status` | GET | 获取服务状态 |
+| `/api/v1/host/sampling/requests` | GET | 获取待审核请求 |
+| `/api/v1/host/sampling/requests/{id}/approve` | POST | 批准请求 |
+| `/api/v1/host/sampling/requests/{id}/reject` | POST | 拒绝请求 |
+| `/api/v1/host/sampling/cleanup` | POST | 清理过期请求 |
+| `/api/v1/host/sampling/servers` | GET | 获取支持 Sampling 的服务器 |
+
+#### 核心技术点
+
+1. **能力声明**
+   - 在 MCP initialize 时声明 `capabilities.sampling: {}`
+   - STDIO 和 SSE 客户端均支持
+
+2. **后台监听**
+   - STDIO：独立的 stdout 监听任务
+   - SSE：通过现有事件流接收请求
+
+3. **安全策略链**
+   - Server 权限检查 → 速率限制 → Token 限制 → 内容过滤 → 审核策略
+
+4. **审核机制**
+   - `require_approval = true` 时，超过 `auto_approve_threshold` 的请求需要人工审核
+   - 请求加入待审核队列，超时自动过期
+
+```python
+# 配置示例
+sampling_service.update_config({
+    "max_tokens_limit": 2048,
+    "require_approval": True,
+    "auto_approve_threshold": 100,
+    "blocked_keywords": ["敏感词"],
+    "blocked_servers": ["untrusted_server"]
+})
+```
+
+---
+
+### 3.9 前端组件
 
 #### MCPManager.vue - 服务器管理页面
 
@@ -649,6 +852,32 @@ flowchart TB
     H -->|拒绝| J[继续对话]
 ```
 
+#### SamplingPage.vue - Sampling 管理页面
+
+**功能**:
+- Sampling 安全配置管理
+- 待审核请求列表展示
+- 请求批准/拒绝操作
+- 支持 Sampling 的服务器列表
+- 实时状态刷新（10 秒轮询）
+
+**页面布局**:
+
+```
+┌─────────────────────────────────────────────────────┐
+│  状态概览卡片（待审核数、服务器数、速率限制、审核开关）   │
+├─────────────────────┬───────────────────────────────┤
+│  安全配置面板        │  待审核请求列表                 │
+│  - Token 限制       │  - 请求卡片                    │
+│  - 速率限制         │    - 来源服务器                │
+│  - 审核策略         │    - 消息预览                  │
+│  - 内容过滤         │    - 批准/拒绝按钮             │
+│  - Server 权限      │                               │
+├─────────────────────┴───────────────────────────────┤
+│  支持 Sampling 的服务器网格                           │
+└─────────────────────────────────────────────────────┘
+```
+
 ---
 
 ## 4. 关键实现细节
@@ -693,8 +922,8 @@ flowchart TB
 | Tools | ✅ 完整支持 | 工具发现、调用、结果处理 |
 | Resources | ✅ 支持 | 资源列表、读取 |
 | Prompts | ✅ 支持 | 提示模板列表、获取 |
-| Sampling | ❌ 未支持 | 服务端请求 LLM |
-| Roots | ❌ 未支持 | 工作区管理 |
+| Sampling | ✅ 支持 | 服务端请求 LLM、安全策略、人工审核 |
+| Roots | ✅ 支持 | 工作区目录管理、路径验证、变更通知 |
 
 ### 4.2 消息传输机制和数据格式
 
@@ -1058,12 +1287,11 @@ HEFENG_API_URL=https://xxx  # 和风天气 API URL
 
 | 不足 | 影响 | 改进建议 |
 |------|------|----------|
-| **SSE 服务器未实际接入** | 远程 MCP 服务器场景未验证 | 接入实际业务场景测试 |
+| **SSE 服务器未实际业务接入** | 远程 MCP 服务器场景未在生产环境验证 | 接入实际远程 MCP 服务器进行端到端测试 |
 | **风险评估基于关键词** | 可能误判或漏判 | 引入更智能的风险评估模型 |
 | **工具结果缓存缺失** | 重复调用相同参数 | 添加短期缓存机制 |
-| **错误重试机制简单** | 网络波动可能导致失败 | 实现指数退避重试 |
+| **前端依赖版本冲突** | npm 安装可能失败 | 锁定依赖版本、清理缓存 |
 | **监控指标不足** | 难以分析性能瓶颈 | 添加 Prometheus 指标 |
-| **测试覆盖率** | 部分边界情况未覆盖 | 补充单元测试和集成测试 |
 
 ### 6.3 后续优化方向建议
 
@@ -1120,29 +1348,35 @@ HEFENG_API_URL=https://xxx  # 和风天气 API URL
 backend/app/
 ├── api/v1/
 │   ├── mcp.py              # 557 行
-│   ├── mcp_host.py         # 574 行
+│   ├── mcp_host.py         # 1,035 行 (含 Roots + Sampling API)
 │   ├── mcp_test.py         # 879 行
 │   └── mcp_context.py      # 181 行
 ├── services/
-│   ├── stdio_mcp_manager.py    # 354 行
-│   ├── sse_mcp_client.py       # 561 行
-│   ├── mcp_host_service.py     # 399 行
+│   ├── stdio_mcp_manager.py    # ~620 行 (含 Roots + Sampling 支持)
+│   ├── sse_mcp_client.py       # 1,167 行 (含 Roots + Sampling 支持)
+│   ├── mcp_host_service.py     # ~700 行 (含 Roots + Sampling 集成)
+│   ├── roots_service.py        # 550 行 ✅ 完整实现
+│   ├── sampling_service.py     # 925 行 ✅ 完整实现
 │   ├── react_engine.py         # 706 行
 │   ├── human_in_loop.py        # 382 行
 │   ├── mcp_tools_service.py    # 376 行
 │   └── mcp_client_service.py   # 763 行
 ├── models/
 │   └── mcp_server.py       # 104 行
-└── 总计                     # ~5,836 行
+├── tests/
+│   ├── test_roots_service.py   # 538 行 ✅ 完整测试
+│   └── test_sampling.py        # 465 行 ✅ 完整测试
+└── 总计                     # ~8,500+ 行
 
 frontend/src/
 ├── views/
 │   ├── MCPManager.vue      # 2,414 行
-│   └── MCPHostPage.vue     # 601 行
+│   ├── MCPHostPage.vue     # 601 行
+│   └── SamplingPage.vue    # 1,369 行 ✅ 新增
 ├── components/MCPHost/
 │   ├── ChatPanel.vue
 │   └── ConfirmationModal.vue
-└── api/index.js            # MCP API 封装
+└── api/index.js            # MCP API 封装 (含 Sampling API)
 ```
 
 ### B. API 端点汇总
@@ -1161,6 +1395,23 @@ frontend/src/
 | | `/api/v1/host/servers/stdio/{key}/start` | POST | 启动服务器 |
 | | `/api/v1/host/servers/stdio/{key}/stop` | POST | 停止服务器 |
 | | `/api/v1/host/tools` | GET | 聚合工具列表 |
+| Roots | `/api/v1/host/servers/{key}/roots` | GET | 获取根目录列表 |
+| | `/api/v1/host/servers/{key}/roots` | PUT | 配置根目录 |
+| | `/api/v1/host/servers/{key}/roots` | POST | 添加根目录 |
+| | `/api/v1/host/servers/{key}/roots` | DELETE | 移除根目录 |
+| | `/api/v1/host/servers/{key}/validate-path` | POST | 验证路径权限 |
+| | `/api/v1/host/roots/global` | GET | 获取全局根目录 |
+| | `/api/v1/host/roots/global` | POST | 添加全局根目录 |
+| | `/api/v1/host/roots/global` | DELETE | 移除全局根目录 |
+| | `/api/v1/host/roots/status` | GET | Roots 服务状态 |
+| Sampling | `/api/v1/host/sampling/config` | GET | 获取 Sampling 配置 |
+| | `/api/v1/host/sampling/config` | PUT | 更新 Sampling 配置 |
+| | `/api/v1/host/sampling/status` | GET | Sampling 服务状态 |
+| | `/api/v1/host/sampling/requests` | GET | 待审核请求列表 |
+| | `/api/v1/host/sampling/requests/{id}/approve` | POST | 批准请求 |
+| | `/api/v1/host/sampling/requests/{id}/reject` | POST | 拒绝请求 |
+| | `/api/v1/host/sampling/cleanup` | POST | 清理过期请求 |
+| | `/api/v1/host/sampling/servers` | GET | 支持 Sampling 的服务器 |
 | 测试 | `/api/v1/mcp-test/stdio/status` | GET | STDIO 状态 |
 | | `/api/v1/mcp-test/stdio/start` | POST | 启动测试服务器 |
 | | `/api/v1/mcp-test/stdio/tools/call` | POST | 调用工具 |

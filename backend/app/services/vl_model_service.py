@@ -566,7 +566,7 @@ class VLModelService:
         return {
             "model": self.model_name,
             "messages": messages,
-            "max_tokens": 4096,
+            "max_tokens": 16384,  # 增加到 16K 以支持复杂页面
             "temperature": 0.1,
             "stream": stream
         }
@@ -576,7 +576,7 @@ class VLModelService:
         return {
             "model": self.model_name,
             "messages": messages,
-            "max_tokens": 4096,
+            "max_tokens": 16384,  # 增加到 16K 以支持复杂页面
             "temperature": 0.1,
             "stream": stream
         }
@@ -586,7 +586,7 @@ class VLModelService:
         request = {
             "model": self.model_name,
             "messages": messages,
-            "max_tokens": 4096,
+            "max_tokens": 16384,  # 增加到 16K 以支持复杂页面
             "temperature": 0.1,
             "stream": stream
         }
@@ -692,15 +692,15 @@ class VLModelService:
             clarification_questions=data.get("clarification_questions")
         )
 
-    async def _parse_json_with_retry(self, messages: list, content: str) -> dict:
+    def _clean_json_content(self, content: str) -> str:
         """
-        模型输出 JSON 解析失败时进行一次纠错重试
-        对应需求: REQ-M2-021
+        清理 JSON 内容中的非法控制字符
+        处理模型输出中可能包含的未转义换行符等问题
         """
-        # 尝试提取 JSON (处理可能包含 markdown 代码块的情况)
-        json_content = content.strip()
+        import re
         
         # 去除 markdown 代码块
+        json_content = content.strip()
         if json_content.startswith("```json"):
             json_content = json_content[7:]
         elif json_content.startswith("```"):
@@ -708,6 +708,89 @@ class VLModelService:
         if json_content.endswith("```"):
             json_content = json_content[:-3]
         json_content = json_content.strip()
+        
+        # 清理字符串值中的非法控制字符
+        # 这个正则表达式匹配 JSON 字符串值并替换其中的控制字符
+        def clean_string_value(match):
+            value = match.group(0)
+            # 替换未转义的控制字符
+            value = value.replace('\n', '\\n')
+            value = value.replace('\r', '\\r')
+            value = value.replace('\t', '\\t')
+            # 移除其他控制字符 (ASCII 0-31 除了已转义的)
+            cleaned = ''
+            i = 0
+            while i < len(value):
+                char = value[i]
+                if char == '\\' and i + 1 < len(value):
+                    # 保留合法的转义序列
+                    cleaned += char + value[i + 1]
+                    i += 2
+                elif ord(char) < 32 and char not in '\n\r\t':
+                    # 跳过非法控制字符
+                    i += 1
+                else:
+                    cleaned += char
+                    i += 1
+            return cleaned
+        
+        # 使用更简单的方法：直接替换字符串中的非法字符
+        # 先尝试直接解析
+        try:
+            json.loads(json_content)
+            return json_content
+        except json.JSONDecodeError:
+            pass
+        
+        # 如果失败，清理控制字符
+        # 替换字符串值内的裸换行符为转义版本
+        # 这个正则匹配 "..." 字符串，处理其中的控制字符
+        result = []
+        in_string = False
+        escape_next = False
+        
+        for i, char in enumerate(json_content):
+            if escape_next:
+                result.append(char)
+                escape_next = False
+                continue
+                
+            if char == '\\' and in_string:
+                result.append(char)
+                escape_next = True
+                continue
+                
+            if char == '"' and not escape_next:
+                in_string = not in_string
+                result.append(char)
+                continue
+            
+            if in_string:
+                # 在字符串内，替换控制字符
+                if char == '\n':
+                    result.append('\\n')
+                elif char == '\r':
+                    result.append('\\r')
+                elif char == '\t':
+                    result.append('\\t')
+                elif ord(char) < 32:
+                    # 跳过其他控制字符
+                    continue
+                else:
+                    result.append(char)
+            else:
+                # 在字符串外，保留换行和空白（JSON 允许）
+                result.append(char)
+        
+        return ''.join(result)
+    
+    async def _parse_json_with_retry(self, messages: list, content: str) -> dict:
+        """
+        模型输出 JSON 解析失败时进行一次纠错重试
+        对应需求: REQ-M2-021
+        """
+        # 清理并提取 JSON 内容
+        json_content = self._clean_json_content(content)
         
         try:
             return json.loads(json_content)
@@ -734,7 +817,7 @@ class VLModelService:
                 request_body = {
                     "model": self.model_name,
                     "messages": retry_messages,
-                    "max_tokens": 4096,
+                    "max_tokens": 16384,  # 增加到 16K 以支持复杂页面
                     "temperature": 0.1
                 }
                 
@@ -748,31 +831,18 @@ class VLModelService:
             
             retry_content = retry_result["choices"][0]["message"]["content"].strip()
             
-            # 再次尝试去除 markdown
-            if retry_content.startswith("```json"):
-                retry_content = retry_content[7:]
-            elif retry_content.startswith("```"):
-                retry_content = retry_content[3:]
-            if retry_content.endswith("```"):
-                retry_content = retry_content[:-3]
+            # 再次清理并解析
+            retry_content = self._clean_json_content(retry_content)
             
-            return json.loads(retry_content.strip())
+            return json.loads(retry_content)
     
     async def _parse_accumulated_content(self, messages: list, content: str) -> dict:
         """
         解析流式输出累积的内容
         类似 _parse_json_with_retry，但专门用于流式输出
         """
-        json_content = content.strip()
-        
-        # 去除 markdown 代码块
-        if json_content.startswith("```json"):
-            json_content = json_content[7:]
-        elif json_content.startswith("```"):
-            json_content = json_content[3:]
-        if json_content.endswith("```"):
-            json_content = json_content[:-3]
-        json_content = json_content.strip()
+        # 清理并提取 JSON 内容
+        json_content = self._clean_json_content(content)
         
         try:
             return json.loads(json_content)
@@ -869,7 +939,7 @@ class VLModelService:
             request_body = {
                 "model": self.model_name,
                 "messages": messages,
-                "max_tokens": 4096,
+                "max_tokens": 16384,  # 增加到 16K 以支持复杂页面
                 "temperature": 0.1
             }
             
