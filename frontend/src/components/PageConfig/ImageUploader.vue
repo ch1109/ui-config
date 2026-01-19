@@ -77,19 +77,11 @@
           <p class="upload-hint">或点击上传</p>
           <p class="upload-formats">支持 PNG, JPG (最大 10MB)</p>
         </label>
-        <div class="upload-actions">
-          <button
-            class="paste-btn"
-            type="button"
-            :disabled="disabled || isUploading"
-            @click="handlePasteFromClipboard"
-            title="从剪贴板粘贴图片 (Ctrl/Cmd + V)"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-            </svg>
-            粘贴图片
-          </button>
+        <div class="paste-hint">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+          </svg>
+          <span>也可按 <kbd>Ctrl</kbd>+<kbd>V</kbd> 粘贴图片</span>
         </div>
       </div>
     </template>
@@ -208,79 +200,7 @@ const handleRemove = () => {
   emit('update:modelValue', null)
 }
 
-// 从剪贴板粘贴图片（按钮点击触发）
-const handlePasteFromClipboard = async () => {
-  if (props.disabled || isUploading.value) return
-
-  try {
-    // 检查浏览器是否支持 Clipboard API
-    if (!navigator.clipboard || !navigator.clipboard.read) {
-      // 降级提示：使用 Ctrl/Cmd + V 快捷键
-      emit('upload-error', {
-        code: 'CLIPBOARD_API_UNAVAILABLE',
-        message: '请先复制图片，然后按 Ctrl+V (Windows) 或 Cmd+V (Mac) 粘贴'
-      })
-      return
-    }
-
-    // 读取剪贴板内容
-    const clipboardItems = await navigator.clipboard.read()
-
-    // 查找图片类型
-    let imageFound = false
-    for (const clipboardItem of clipboardItems) {
-      for (const type of clipboardItem.types) {
-        // 只处理图片类型
-        if (type.startsWith('image/')) {
-          imageFound = true
-          const blob = await clipboardItem.getType(type)
-
-          // 根据 MIME 类型确定文件扩展名
-          const extension = type === 'image/jpeg' ? 'jpg' : type.split('/')[1]
-          const filename = `pasted-image-${Date.now()}.${extension}`
-
-          // 转换为 File 对象
-          const file = new File([blob], filename, { type })
-
-          // 复用现有的上传逻辑
-          await processFile(file)
-          return
-        }
-      }
-    }
-
-    // 如果没有找到图片
-    if (!imageFound) {
-      emit('upload-error', {
-        code: 'NO_IMAGE_IN_CLIPBOARD',
-        message: '剪贴板中没有图片，请先复制图片后再试'
-      })
-    }
-  } catch (error) {
-    console.error('Paste from clipboard error:', error)
-
-    // 处理权限错误或其他错误
-    if (error.name === 'NotAllowedError') {
-      emit('upload-error', {
-        code: 'CLIPBOARD_PERMISSION_DENIED',
-        message: '请允许浏览器访问剪贴板，或使用 Ctrl+V (Windows) / Cmd+V (Mac) 粘贴'
-      })
-    } else if (error.name === 'NotFoundError') {
-      emit('upload-error', {
-        code: 'NO_IMAGE_IN_CLIPBOARD',
-        message: '剪贴板中没有图片，请先复制图片后再试'
-      })
-    } else {
-      // 其他错误，提示使用快捷键
-      emit('upload-error', {
-        code: 'CLIPBOARD_READ_ERROR',
-        message: '读取剪贴板失败，请尝试使用 Ctrl+V (Windows) 或 Cmd+V (Mac) 粘贴'
-      })
-    }
-  }
-}
-
-// 处理 paste 事件（更好的兼容性，不需要 Clipboard API 权限）
+// 处理 paste 事件（兼容性好，不需要 Clipboard API 权限）
 const handlePaste = async (e) => {
   // 如果焦点在输入框或文本域，不拦截
   const activeElement = document.activeElement
@@ -490,52 +410,34 @@ onUnmounted(() => {
   }
 }
 
-.upload-actions {
-  width: 100%;
+.paste-hint {
   display: flex;
-  justify-content: center;
-  gap: 12px;
-  margin-top: 8px;
-}
-
-.paste-btn {
-  display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 12px 28px;
-  font-size: 14px;
-  font-weight: 600;
-  color: white;
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-  border: none;
-  border-radius: 12px;
-  cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
-  white-space: nowrap;
-
+  gap: 6px;
+  padding: 8px 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border-radius: 8px;
+  margin-top: 8px;
+  
   svg {
-    width: 18px;
-    height: 18px;
-    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
+    opacity: 0.7;
   }
-
-  &:hover:not(:disabled) {
-    transform: translateY(-3px);
-    box-shadow: 0 8px 24px rgba(99, 102, 241, 0.45);
-    background: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%);
-  }
-
-  &:active:not(:disabled) {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
-  }
-
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    transform: none;
+  
+  kbd {
+    display: inline-block;
+    padding: 2px 6px;
+    font-size: 11px;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    color: var(--text-primary);
+    background: var(--bg-subtle);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    box-shadow: 0 1px 0 var(--border-color);
   }
 }
 

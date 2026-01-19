@@ -20,12 +20,32 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# 解决 macOS 上 Python LibreSSL 的 SSL 证书问题
-# 使用系统 SSL 证书文件
-SSL_CERT_FILE = "/etc/ssl/cert.pem"
-if os.path.exists(SSL_CERT_FILE):
-    os.environ.setdefault('SSL_CERT_FILE', SSL_CERT_FILE)
-    os.environ.setdefault('REQUESTS_CA_BUNDLE', SSL_CERT_FILE)
+# 解决 SSL 证书验证问题
+# 使用 True 让 httpx 使用其内置的证书验证（基于 certifi）
+def _get_ssl_verify():
+    """获取 SSL 验证配置，优先使用 httpx 默认配置"""
+    # 检查环境变量，允许用户自定义证书路径
+    env_cert = os.environ.get('SSL_CERT_FILE') or os.environ.get('REQUESTS_CA_BUNDLE')
+    if env_cert and os.path.exists(env_cert):
+        return env_cert
+    
+    # 尝试常见的系统证书路径
+    possible_paths = [
+        "/etc/ssl/cert.pem",  # macOS (Homebrew OpenSSL)
+        "/etc/ssl/certs/ca-certificates.crt",  # Debian/Ubuntu
+        "/etc/pki/tls/certs/ca-bundle.crt",  # RHEL/CentOS
+        "/usr/local/etc/openssl@3/cert.pem",  # macOS Homebrew OpenSSL 3
+        "/usr/local/etc/openssl/cert.pem",  # macOS Homebrew OpenSSL
+    ]
+    for path in possible_paths:
+        if os.path.exists(path):
+            return path
+    
+    # 默认使用 httpx 内置验证（基于 certifi 或系统默认）
+    return True
+
+SSL_VERIFY = _get_ssl_verify()
+logger.info(f"SSL verification config: {SSL_VERIFY}")
 
 # Qwen2.5-VL-7B 本地部署配置
 QWEN_LOCAL_ENDPOINT = "http://192.168.3.183:9000/vision/chat"
@@ -124,7 +144,7 @@ class VLModelService:
         
         logger.debug(f"Request body keys: {list(request_body.keys())}, model: {request_body.get('model')}")
         
-        async with httpx.AsyncClient(timeout=self.timeout, verify=SSL_CERT_FILE) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, verify=SSL_VERIFY) as client:
             headers = {
                 "Content-Type": "application/json"
             }
@@ -194,7 +214,7 @@ class VLModelService:
         logger.info(f"Image size: {len(image_bytes)} bytes, content_type: {content_type}")
         logger.debug(f"Messages data: {json.dumps(messages_data, ensure_ascii=False)[:200]}...")
         
-        async with httpx.AsyncClient(timeout=self.timeout, verify=SSL_CERT_FILE) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, verify=SSL_VERIFY) as client:
             # 使用 multipart/form-data 格式
             files = {
                 "image_file": (filename, image_bytes, content_type)
@@ -293,7 +313,7 @@ class VLModelService:
             if not self._is_safe_url(image_url):
                 raise SSRFProtectionError()
             
-            async with httpx.AsyncClient(timeout=30.0, verify=SSL_CERT_FILE) as client:
+            async with httpx.AsyncClient(timeout=30.0, verify=SSL_VERIFY) as client:
                 resp = await client.get(image_url, follow_redirects=True)
                 content_type = resp.headers.get("Content-Type", "")
                 
@@ -393,7 +413,7 @@ class VLModelService:
             
             accumulated_content = ""
             
-            async with httpx.AsyncClient(timeout=self.timeout, verify=SSL_CERT_FILE) as client:
+            async with httpx.AsyncClient(timeout=self.timeout, verify=SSL_VERIFY) as client:
                 headers = {
                     "Content-Type": "application/json"
                 }
@@ -581,7 +601,7 @@ class VLModelService:
             if not self._is_safe_url(image_url):
                 raise SSRFProtectionError()
             
-            async with httpx.AsyncClient(timeout=30.0, verify=SSL_CERT_FILE) as client:
+            async with httpx.AsyncClient(timeout=30.0, verify=SSL_VERIFY) as client:
                 resp = await client.get(image_url, follow_redirects=True)
                 content_type = resp.headers.get("Content-Type", "")
                 
@@ -706,7 +726,7 @@ class VLModelService:
                 }
             ]
             
-            async with httpx.AsyncClient(timeout=self.timeout, verify=SSL_CERT_FILE) as client:
+            async with httpx.AsyncClient(timeout=self.timeout, verify=SSL_VERIFY) as client:
                 headers = {"Content-Type": "application/json"}
                 if self.api_key:
                     headers["Authorization"] = f"Bearer {self.api_key}"
@@ -841,7 +861,7 @@ class VLModelService:
             "content": f"用户回答: {user_response}\n\n请基于这个信息更新配置，并判断是否还需要继续澄清。只输出 JSON。"
         })
         
-        async with httpx.AsyncClient(timeout=self.timeout, verify=SSL_CERT_FILE) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, verify=SSL_VERIFY) as client:
             headers = {"Content-Type": "application/json"}
             if self.api_key:
                 headers["Authorization"] = f"Bearer {self.api_key}"
@@ -916,7 +936,7 @@ class VLModelService:
             
             accumulated_content = ""
             
-            async with httpx.AsyncClient(timeout=self.timeout, verify=SSL_CERT_FILE) as client:
+            async with httpx.AsyncClient(timeout=self.timeout, verify=SSL_VERIFY) as client:
                 headers = {"Content-Type": "application/json"}
                 if self.api_key:
                     headers["Authorization"] = f"Bearer {self.api_key}"
