@@ -364,7 +364,7 @@ class ReActEngine:
         tools: List[Dict[str, Any]],
         config: LLMConfig
     ) -> Dict[str, Any]:
-        """调用智谱 API（兼容 OpenAI 格式）"""
+        """调用智谱 API（兼容 OpenAI 格式），支持 429 限流重试"""
         from app.core.config import settings
         base_url = config.base_url or "https://open.bigmodel.cn/api/paas/v4"
         api_key = config.api_key or settings.ZHIPU_API_KEY or ""
@@ -386,23 +386,66 @@ class ReActEngine:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
         
-        response = await client.post(
-            f"{base_url}/chat/completions",
-            headers=headers,
-            json=payload
-        )
-        response.raise_for_status()
+        # 重试配置 - 针对 429 错误使用更长的延迟
+        max_retries = 3
+        base_delay = 5.0  # 起始延迟增加到 5 秒（429 错误通常需要更长时间）
         
-        result = response.json()
-        choice = result["choices"][0]
-        message = choice["message"]
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                response = await client.post(
+                    f"{base_url}/chat/completions",
+                    headers=headers,
+                    json=payload
+                )
+                response.raise_for_status()
+                
+                result = response.json()
+                choice = result["choices"][0]
+                message = choice["message"]
+                
+                return {
+                    "content": message.get("content", ""),
+                    "tool_calls": message.get("tool_calls", []),
+                    "finish_reason": choice.get("finish_reason", "stop"),
+                    "usage": result.get("usage", {})
+                }
+            except httpx.HTTPStatusError as e:
+                last_error = e
+                # 429 Too Many Requests - 限流错误，需要重试
+                if e.response.status_code == 429:
+                    if attempt < max_retries:
+                        # 优先使用响应头中的 Retry-After 提示
+                        retry_after = None
+                        try:
+                            retry_after_header = e.response.headers.get("Retry-After")
+                            if retry_after_header:
+                                retry_after = int(retry_after_header)
+                        except (ValueError, TypeError):
+                            pass
+                        
+                        # 如果响应头没有 Retry-After，使用指数退避，但延迟更长
+                        if retry_after:
+                            delay = float(retry_after)
+                        else:
+                            delay = base_delay * (2 ** attempt)  # 指数退避: 5s, 10s, 20s
+                        
+                        logger.warning(
+                            f"智谱 API 限流 (429)，{delay:.1f}秒后重试 (尝试 {attempt + 1}/{max_retries})"
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    else:
+                        logger.error(f"智谱 API 限流，已达最大重试次数 ({max_retries})")
+                        raise Exception(
+                            f"API 请求频率过高 (429 Too Many Requests)，请稍后重试。"
+                            f"建议：1) 等待 30-60 秒后再试 2) 减少请求频率 3) 升级 API 配额"
+                        ) from e
+                # 其他 HTTP 错误直接抛出
+                raise
         
-        return {
-            "content": message.get("content", ""),
-            "tool_calls": message.get("tool_calls", []),
-            "finish_reason": choice.get("finish_reason", "stop"),
-            "usage": result.get("usage", {})
-        }
+        # 所有重试都失败
+        raise last_error or Exception("智谱 API 调用失败")
     
     def parse_tool_calls(
         self,

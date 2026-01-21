@@ -172,110 +172,112 @@
         </div>
       </section>
 
-      <!-- 右侧：请求队列 -->
-      <section class="requests-panel">
-        <div class="panel-header">
-          <h2>📋 待审核请求</h2>
-          <button class="btn-cleanup" @click="cleanupExpired" :disabled="cleaning">
-            {{ cleaning ? '清理中...' : '清理过期' }}
-          </button>
-        </div>
+      <!-- 右侧：请求队列 + 服务器列表 -->
+      <div class="right-column">
+        <section class="requests-panel">
+          <div class="panel-header">
+            <h2>📋 待审核请求</h2>
+            <button class="btn-cleanup" @click="cleanupExpired" :disabled="cleaning">
+              {{ cleaning ? '清理中...' : '清理过期' }}
+            </button>
+          </div>
 
-        <div class="requests-list" v-if="pendingRequests.length > 0">
-          <div 
-            v-for="request in pendingRequests" 
-            :key="request.id" 
-            class="request-card"
-          >
-            <div class="request-header">
-              <span class="request-server">{{ request.server_key }}</span>
-              <span class="request-time">{{ formatTime(request.created_at) }}</span>
-            </div>
-            
-            <div class="request-content">
-              <div class="request-messages">
-                <div 
-                  v-for="(msg, idx) in request.messages.slice(-2)" 
-                  :key="idx"
-                  class="message-preview"
-                  :class="msg.role"
-                >
-                  <span class="role-badge">{{ msg.role }}</span>
-                  <span class="message-text">{{ getMessageText(msg) }}</span>
-                </div>
+          <div class="requests-list" v-if="pendingRequests.length > 0">
+            <div 
+              v-for="request in pendingRequests" 
+              :key="request.id" 
+              class="request-card"
+            >
+              <div class="request-header">
+                <span class="request-server">{{ request.server_key }}</span>
+                <span class="request-time">{{ formatTime(request.created_at) }}</span>
               </div>
               
-              <div class="request-meta">
-                <span class="meta-item">
-                  <span class="meta-icon">🎯</span>
-                  {{ request.max_tokens }} tokens
-                </span>
-                <span class="meta-item" v-if="request.system_prompt">
-                  <span class="meta-icon">📝</span>
-                  有系统提示词
-                </span>
+              <div class="request-content">
+                <div class="request-messages">
+                  <div 
+                    v-for="(msg, idx) in request.messages.slice(-2)" 
+                    :key="idx"
+                    class="message-preview"
+                    :class="msg.role"
+                  >
+                    <span class="role-badge">{{ msg.role }}</span>
+                    <span class="message-text">{{ getMessageText(msg) }}</span>
+                  </div>
+                </div>
+                
+                <div class="request-meta">
+                  <span class="meta-item">
+                    <span class="meta-icon">🎯</span>
+                    {{ request.max_tokens }} tokens
+                  </span>
+                  <span class="meta-item" v-if="request.system_prompt">
+                    <span class="meta-icon">📝</span>
+                    有系统提示词
+                  </span>
+                </div>
+              </div>
+
+              <div class="request-actions">
+                <button 
+                  class="btn-approve" 
+                  @click="approveRequest(request)"
+                  :disabled="processingId === request.id"
+                >
+                  ✓ 批准
+                </button>
+                <button 
+                  class="btn-reject" 
+                  @click="showRejectModal(request)"
+                  :disabled="processingId === request.id"
+                >
+                  ✗ 拒绝
+                </button>
+                <button 
+                  class="btn-detail" 
+                  @click="showDetailModal(request)"
+                >
+                  详情
+                </button>
               </div>
             </div>
+          </div>
 
-            <div class="request-actions">
-              <button 
-                class="btn-approve" 
-                @click="approveRequest(request)"
-                :disabled="processingId === request.id"
-              >
-                ✓ 批准
-              </button>
-              <button 
-                class="btn-reject" 
-                @click="showRejectModal(request)"
-                :disabled="processingId === request.id"
-              >
-                ✗ 拒绝
-              </button>
-              <button 
-                class="btn-detail" 
-                @click="showDetailModal(request)"
-              >
-                详情
-              </button>
+          <div class="empty-state" v-else>
+            <div class="empty-icon">📭</div>
+            <p>暂无待审核的请求</p>
+            <span class="empty-hint">
+              {{ config.require_approval ? '当 MCP Server 发起高 Token 请求时会显示在这里' : '当前审核功能已关闭' }}
+            </span>
+          </div>
+        </section>
+
+        <!-- 支持的服务器列表 -->
+        <section class="servers-section">
+          <h2>🖥️ 支持 Sampling 的服务器</h2>
+          <div class="servers-grid" v-if="samplingServers.length > 0">
+            <div 
+              v-for="server in samplingServers" 
+              :key="server.server_key"
+              class="server-card"
+              :class="{ active: server.listener_active || server.connected }"
+            >
+              <div class="server-status">
+                <span class="status-dot" :class="{ active: server.listener_active || server.connected }"></span>
+              </div>
+              <div class="server-info">
+                <span class="server-name">{{ server.server_key }}</span>
+                <span class="server-transport">{{ server.transport.toUpperCase() }}</span>
+              </div>
             </div>
           </div>
-        </div>
-
-        <div class="empty-state" v-else>
-          <div class="empty-icon">📭</div>
-          <p>暂无待审核的请求</p>
-          <span class="empty-hint">
-            {{ config.require_approval ? '当 MCP Server 发起高 Token 请求时会显示在这里' : '当前审核功能已关闭' }}
-          </span>
-        </div>
-      </section>
+          <div class="empty-state small" v-else>
+            <p>暂无支持 Sampling 的服务器</p>
+            <span class="empty-hint">请先在 MCP 管理页面启动服务器</span>
+          </div>
+        </section>
+      </div>
     </div>
-
-    <!-- 支持的服务器列表 -->
-    <section class="servers-section">
-      <h2>🖥️ 支持 Sampling 的服务器</h2>
-      <div class="servers-grid" v-if="samplingServers.length > 0">
-        <div 
-          v-for="server in samplingServers" 
-          :key="server.server_key"
-          class="server-card"
-          :class="{ active: server.listener_active || server.connected }"
-        >
-          <div class="server-status">
-            <span class="status-dot" :class="{ active: server.listener_active || server.connected }"></span>
-          </div>
-          <div class="server-info">
-            <span class="server-name">{{ server.server_key }}</span>
-            <span class="server-transport">{{ server.transport.toUpperCase() }}</span>
-          </div>
-        </div>
-      </div>
-      <div class="empty-state small" v-else>
-        <p>暂无支持 Sampling 的服务器</p>
-        <span class="empty-hint">请先在 MCP 管理页面启动服务器</span>
-      </div>
-    </section>
 
     <!-- 拒绝原因弹窗 -->
     <div v-if="rejectModalVisible" class="modal-overlay" @click.self="rejectModalVisible = false">
@@ -636,7 +638,7 @@ function showToast(message, type = 'info') {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 24px;
+  margin-bottom: 12px;
 }
 
 .header-content h1 {
@@ -691,22 +693,22 @@ function showToast(message, type = 'info') {
 .status-overview {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-  margin-bottom: 24px;
+  gap: 12px;
+  margin-bottom: 10px;
 }
 
 .status-card {
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 20px;
+  padding: 16px;
   background: rgba(255, 255, 255, 0.05);
   border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .status-icon {
-  font-size: 32px;
+  font-size: 28px;
 }
 
 .status-info {
@@ -715,7 +717,7 @@ function showToast(message, type = 'info') {
 }
 
 .status-value {
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 600;
   color: #fff;
 }
@@ -729,24 +731,41 @@ function showToast(message, type = 'info') {
 .main-content {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 24px;
-  margin-bottom: 24px;
+  gap: 12px;
+  align-items: stretch;
+}
+
+/* 右侧列容器 */
+.right-column {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 /* 配置面板 */
-.config-panel,
-.requests-panel {
+.config-panel {
   background: rgba(255, 255, 255, 0.03);
   border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   overflow: hidden;
 }
 
+.requests-panel {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .panel-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px 20px;
+  padding: 12px 16px;
   background: rgba(255, 255, 255, 0.03);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
@@ -783,24 +802,22 @@ function showToast(message, type = 'info') {
 
 /* 配置表单 */
 .config-form {
-  padding: 20px;
-  max-height: 600px;
-  overflow-y: auto;
+  padding: 12px 16px 8px;
 }
 
 .config-group {
-  margin-bottom: 24px;
+  margin-bottom: 10px;
 }
 
 .config-group h3 {
-  margin: 0 0 12px;
+  margin: 0 0 8px;
   font-size: 14px;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.8);
 }
 
 .form-row {
-  margin-bottom: 16px;
+  margin-bottom: 8px;
 }
 
 .form-row label {
@@ -813,7 +830,7 @@ function showToast(message, type = 'info') {
 .form-row input[type="number"],
 .form-row textarea {
   width: 100%;
-  padding: 10px 12px;
+  padding: 8px 10px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
@@ -856,16 +873,16 @@ function showToast(message, type = 'info') {
 
 /* 请求列表 */
 .requests-list {
-  padding: 16px;
-  max-height: 600px;
+  padding: 12px 16px;
   overflow-y: auto;
+  flex: 1;
 }
 
 .request-card {
   background: rgba(255, 255, 255, 0.05);
   border-radius: 12px;
-  padding: 16px;
-  margin-bottom: 12px;
+  padding: 12px;
+  margin-bottom: 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   transition: all 0.2s;
 }
@@ -1002,28 +1019,39 @@ function showToast(message, type = 'info') {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 60px 20px;
+  padding: 20px 16px;
   text-align: center;
+  flex: 1;
 }
 
 .empty-state.small {
-  padding: 40px 20px;
+  padding: 12px 16px;
+  flex: 0;
 }
 
 .empty-icon {
-  font-size: 48px;
-  margin-bottom: 16px;
+  font-size: 40px;
+  margin-bottom: 12px;
 }
 
 .empty-state p {
-  margin: 0 0 8px;
-  font-size: 16px;
+  margin: 0 0 6px;
+  font-size: 15px;
   color: rgba(255, 255, 255, 0.7);
 }
 
 .empty-hint {
-  font-size: 13px;
+  font-size: 12px;
   color: rgba(255, 255, 255, 0.4);
+}
+
+.empty-state.small .empty-icon {
+  display: none;
+}
+
+.empty-state.small p {
+  font-size: 14px;
+  margin-bottom: 4px;
 }
 
 /* 服务器列表 */
@@ -1031,26 +1059,27 @@ function showToast(message, type = 'info') {
   background: rgba(255, 255, 255, 0.03);
   border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  padding: 20px;
+  padding: 12px 16px;
+  flex-shrink: 0;
 }
 
 .servers-section h2 {
-  margin: 0 0 16px;
-  font-size: 16px;
+  margin: 0 0 10px;
+  font-size: 15px;
   font-weight: 600;
 }
 
 .servers-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
 }
 
 .server-card {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
+  gap: 10px;
+  padding: 10px 14px;
   background: rgba(255, 255, 255, 0.05);
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -1346,6 +1375,10 @@ function showToast(message, type = 'info') {
 @media (max-width: 1200px) {
   .main-content {
     grid-template-columns: 1fr;
+  }
+  
+  .right-column {
+    flex-direction: column;
   }
   
   .status-overview {

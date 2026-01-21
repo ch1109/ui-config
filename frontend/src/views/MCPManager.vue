@@ -862,9 +862,18 @@ const getCustomServerKey = (server) => {
   return `custom_${server.id}`
 }
 
+const getPresetKey = (server) => {
+  if (server?.preset_key) return server.preset_key
+  if (server?.name === 'Context7') return 'context7'
+  if (server?.name === 'Everything Server') return 'everything'
+  if (server?.name === '和风天气') return 'hefeng'
+  if (server?.name === 'Wttr天气') return 'wttr'
+  return null
+}
+
 const isServerRunning = (server) => {
   if (server.transport !== 'stdio') return false
-  const key = server.name === 'Context7' ? 'context7' : (server.name === 'Everything Server' ? 'everything' : (server.name === '和风天气' ? 'hefeng' : null))
+  const key = getPresetKey(server)
   if (!key) return false
   return stdioStatus.value[key]?.running || false
 }
@@ -958,7 +967,11 @@ const toggleServer = async (server) => {
 }
 
 const startStdioServer = async (server) => {
-  const key = server.name === 'Context7' ? 'context7' : (server.name === 'Everything Server' ? 'everything' : 'hefeng')
+  const key = getPresetKey(server)
+  if (!key) {
+    message.error('无法识别服务器标识')
+    return
+  }
   startingServer.value = key
   
   try {
@@ -978,7 +991,11 @@ const startStdioServer = async (server) => {
 }
 
 const stopStdioServer = async (server) => {
-  const key = server.name === 'Context7' ? 'context7' : (server.name === 'Everything Server' ? 'everything' : 'hefeng')
+  const key = getPresetKey(server)
+  if (!key) {
+    message.error('无法识别服务器标识')
+    return
+  }
   stoppingServer.value = key
   
   try {
@@ -1167,7 +1184,12 @@ const openTestPanel = async (server) => {
   
   loadingTools.value = true
   try {
-    const key = server.name === 'Context7' ? 'context7' : (server.name === 'Everything Server' ? 'everything' : 'hefeng')
+    const key = getPresetKey(server)
+    if (!key) {
+      message.error('无法识别服务器标识')
+      availableTools.value = []
+      return
+    }
     const res = await mcpTestApi.getStdioTools(key)
     availableTools.value = res.tools || []
   } catch (error) {
@@ -1204,7 +1226,11 @@ const callTool = async () => {
     
     // 判断是预置服务器还是自定义服务器
     if (testingServer.value.is_preset) {
-      key = testingServer.value.name === 'Context7' ? 'context7' : (testingServer.value.name === 'Everything Server' ? 'everything' : 'hefeng')
+      key = getPresetKey(testingServer.value)
+      if (!key) {
+        message.error('无法识别服务器标识')
+        return
+      }
       res = await mcpTestApi.callStdioTool(key, selectedTool.value.name, { ...toolArgs })
     } else {
       // 自定义服务器：判断是 STDIO 还是 SSE
@@ -1478,9 +1504,7 @@ const openRootsDrawer = async (server) => {
   // 确定服务器 key
   let serverKey
   if (server.is_preset) {
-    serverKey = server.name === 'Context7' ? 'context7' : 
-                (server.name === 'Everything Server' ? 'everything' : 
-                (server.name === '和风天气' ? 'hefeng' : null))
+    serverKey = getPresetKey(server)
   } else {
     serverKey = `custom_${server.id}`
   }

@@ -12,8 +12,20 @@
   >
     <!-- Has Image -->
     <template v-if="modelValue">
-      <img :src="modelValue" alt="页面截图" class="preview-image" />
+      <img
+        :src="modelValue"
+        alt="页面截图"
+        class="preview-image"
+        @click="openPreview"
+      />
       <div class="overlay">
+        <button class="btn-action" type="button" @click.stop="openPreview">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+          查看大图
+        </button>
         <label class="btn-action">
           <input 
             type="file" 
@@ -86,10 +98,30 @@
       </div>
     </template>
   </div>
+
+  <a-modal
+    v-model:open="isPreviewVisible"
+    :title="null"
+    :footer="null"
+    :maskClosable="true"
+    :width="previewModalWidth"
+    centered
+    :bodyStyle="{ padding: '0' }"
+  >
+    <img
+      :src="modelValue"
+      alt="页面截图"
+      class="preview-modal-image"
+      :style="{
+        width: previewDisplaySize.width ? previewDisplaySize.width + 'px' : 'auto',
+        height: previewDisplaySize.height ? previewDisplaySize.height + 'px' : 'auto'
+      }"
+    />
+  </a-modal>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { pageConfigApi } from '@/api'
 
 const props = defineProps({
@@ -102,6 +134,11 @@ const emit = defineEmits(['update:modelValue', 'upload-success', 'upload-error']
 const isDragover = ref(false)
 const isUploading = ref(false)
 const uploadProgress = ref(0)
+const isPreviewVisible = ref(false)
+const previewDisplaySize = ref({ width: 0, height: 0 })
+const previewModalWidth = computed(() => {
+  return previewDisplaySize.value.width || 520
+})
 
 const handleDragover = () => {
   if (!props.disabled) isDragover.value = true
@@ -198,6 +235,28 @@ const processFile = async (file) => {
 
 const handleRemove = () => {
   emit('update:modelValue', null)
+}
+
+const openPreview = () => {
+  if (props.disabled || isUploading.value || !props.modelValue) return
+  const img = new Image()
+  img.onload = () => {
+    const naturalWidth = img.naturalWidth || img.width
+    const naturalHeight = img.naturalHeight || img.height
+    const maxWidth = Math.floor(window.innerWidth * 0.9)
+    const maxHeight = Math.floor(window.innerHeight * 0.9)
+    const scale = Math.min(1, maxWidth / naturalWidth, maxHeight / naturalHeight)
+    previewDisplaySize.value = {
+      width: Math.max(1, Math.floor(naturalWidth * scale)),
+      height: Math.max(1, Math.floor(naturalHeight * scale))
+    }
+    isPreviewVisible.value = true
+  }
+  img.onerror = () => {
+    previewDisplaySize.value = { width: 520, height: 390 }
+    isPreviewVisible.value = true
+  }
+  img.src = props.modelValue
 }
 
 // 处理 paste 事件（兼容性好，不需要 Clipboard API 权限）
@@ -303,6 +362,7 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  cursor: zoom-in;
 }
 
 .overlay {
@@ -497,5 +557,11 @@ onUnmounted(() => {
     color: var(--text-secondary);
     font-size: 13px;
   }
+}
+
+.preview-modal-image {
+  display: block;
+  max-width: 90vw;
+  max-height: 90vh;
 }
 </style>

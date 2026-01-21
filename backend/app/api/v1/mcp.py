@@ -64,6 +64,37 @@ PRESET_MCP_SERVERS = {
     }
 }
 
+def _normalize_tools(raw_tools: Any) -> List[str]:
+    """将 tools 字段规范化为字符串列表，避免响应校验失败。"""
+    if raw_tools is None:
+        return []
+    if isinstance(raw_tools, list):
+        if not raw_tools:
+            return []
+        if all(isinstance(item, str) for item in raw_tools):
+            return raw_tools
+        normalized = []
+        for item in raw_tools:
+            if isinstance(item, str):
+                normalized.append(item)
+                continue
+            if isinstance(item, dict):
+                name = item.get("name") or item.get("tool_name") or item.get("id")
+                if name:
+                    normalized.append(str(name))
+                continue
+            normalized.append(str(item))
+        return normalized
+    if isinstance(raw_tools, str):
+        try:
+            parsed = json.loads(raw_tools)
+            return _normalize_tools(parsed)
+        except Exception:
+            return [raw_tools]
+    if isinstance(raw_tools, dict):
+        return [str(key) for key in raw_tools.keys()]
+    return [str(raw_tools)]
+
 
 class MCPServerConfig(BaseModel):
     """MCP 服务器配置"""
@@ -163,16 +194,17 @@ async def list_mcp_servers(db: AsyncSession = Depends(get_db)):
     for server in servers:
         if not server.preset_key:
             transport = server.transport or "http"
+            tools = _normalize_tools(server.tools)
             response_list.append(MCPServerResponse(
                 id=server.id,
                 name=server.name,
-                server_url=server.server_url if transport == "http" else None,
+                server_url=server.server_url if transport in ["http", "sse"] else None,
                 transport=transport,
                 command=server.command if transport == "stdio" else None,
                 args=server.args if transport == "stdio" else None,
                 env=server.env if transport == "stdio" else None,
                 status=server.status,
-                tools=server.tools or [],
+                tools=tools,
                 is_preset=False,
                 description=server.description,
                 last_check=server.last_check.isoformat() if server.last_check else None,

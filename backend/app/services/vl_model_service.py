@@ -809,6 +809,10 @@ class VLModelService:
                 }
             ]
             
+            # 添加延迟，避免立即重试导致限流
+            import asyncio
+            await asyncio.sleep(2.0)  # 延迟 2 秒再重试
+            
             async with httpx.AsyncClient(timeout=self.timeout, verify=SSL_VERIFY) as client:
                 headers = {"Content-Type": "application/json"}
                 if self.api_key:
@@ -821,13 +825,25 @@ class VLModelService:
                     "temperature": 0.1
                 }
                 
-                response = await client.post(
-                    self.api_endpoint,
-                    json=request_body,
-                    headers=headers
-                )
-                response.raise_for_status()
-                retry_result = response.json()
+                try:
+                    response = await client.post(
+                        self.api_endpoint,
+                        json=request_body,
+                        headers=headers
+                    )
+                    response.raise_for_status()
+                    retry_result = response.json()
+                except httpx.HTTPStatusError as e:
+                    # 处理 429 限流错误
+                    if e.response.status_code == 429:
+                        logger.error("JSON 解析重试时遇到 API 限流 (429)，跳过重试")
+                        # 如果遇到限流，直接抛出原始 JSON 解析错误，而不是继续重试
+                        raise json.JSONDecodeError(
+                            f"JSON 解析失败，且重试时遇到 API 限流: {str(e)}",
+                            json_content,
+                            0
+                        ) from e
+                    raise
             
             retry_content = retry_result["choices"][0]["message"]["content"].strip()
             

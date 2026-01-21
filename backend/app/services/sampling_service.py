@@ -600,7 +600,7 @@ class SamplingService:
         max_tokens: int,
         stop_sequences: List[str]
     ) -> SamplingResponse:
-        """调用智谱 API"""
+        """调用智谱 API，支持 429 限流重试"""
         url = base_url or "https://open.bigmodel.cn/api/paas/v4"
         
         headers = {
@@ -618,32 +618,83 @@ class SamplingService:
         if stop_sequences:
             payload["stop"] = stop_sequences
         
-        response = await client.post(
-            f"{url}/chat/completions",
-            headers=headers,
-            json=payload
-        )
-        response.raise_for_status()
+        # 重试配置 - 针对 429 错误使用更长的延迟
+        max_retries = 3
+        base_delay = 5.0  # 起始延迟增加到 5 秒（429 错误通常需要更长时间）
         
-        result = response.json()
-        choice = result["choices"][0]
-        message = choice["message"]
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                response = await client.post(
+                    f"{url}/chat/completions",
+                    headers=headers,
+                    json=payload
+                )
+                response.raise_for_status()
+                
+                result = response.json()
+                choice = result["choices"][0]
+                message = choice["message"]
+                
+                # 确定停止原因
+                finish_reason = choice.get("finish_reason", "stop")
+                if finish_reason == "stop":
+                    stop_reason = SamplingStopReason.END_TURN
+                elif finish_reason == "length":
+                    stop_reason = SamplingStopReason.MAX_TOKENS
+                else:
+                    stop_reason = SamplingStopReason.END_TURN
+                
+                return SamplingResponse(
+                    role="assistant",
+                    content={"type": "text", "text": message.get("content", "")},
+                    model=model,
+                    stop_reason=stop_reason
+                )
+            except Exception as e:
+                last_error = e
+                # 检测 429 限流错误
+                is_rate_limit = False
+                if hasattr(e, 'response') and hasattr(e.response, 'status_code'):
+                    is_rate_limit = e.response.status_code == 429
+                elif '429' in str(e):
+                    is_rate_limit = True
+                
+                if is_rate_limit:
+                    if attempt < max_retries:
+                        # 优先使用响应头中的 Retry-After 提示
+                        retry_after = None
+                        try:
+                            if hasattr(e, 'response') and hasattr(e.response, 'headers'):
+                                retry_after_header = e.response.headers.get("Retry-After")
+                                if retry_after_header:
+                                    retry_after = int(retry_after_header)
+                        except (ValueError, TypeError):
+                            pass
+                        
+                        # 如果响应头没有 Retry-After，使用指数退避，但延迟更长
+                        if retry_after:
+                            delay = float(retry_after)
+                        else:
+                            delay = base_delay * (2 ** attempt)  # 指数退避: 5s, 10s, 20s
+                        
+                        logger.warning(
+                            f"智谱 API 限流 (429)，{delay:.1f}秒后重试 (尝试 {attempt + 1}/{max_retries})"
+                        )
+                        import asyncio
+                        await asyncio.sleep(delay)
+                        continue
+                    else:
+                        logger.error(f"智谱 API 限流，已达最大重试次数 ({max_retries})")
+                        raise Exception(
+                            f"API 请求频率过高 (429 Too Many Requests)，请稍后重试。"
+                            f"建议：1) 等待 30-60 秒后再试 2) 减少请求频率 3) 升级 API 配额"
+                        ) from e
+                # 其他错误直接抛出
+                raise
         
-        # 确定停止原因
-        finish_reason = choice.get("finish_reason", "stop")
-        if finish_reason == "stop":
-            stop_reason = SamplingStopReason.END_TURN
-        elif finish_reason == "length":
-            stop_reason = SamplingStopReason.MAX_TOKENS
-        else:
-            stop_reason = SamplingStopReason.END_TURN
-        
-        return SamplingResponse(
-            role="assistant",
-            content={"type": "text", "text": message.get("content", "")},
-            model=model,
-            stop_reason=stop_reason
-        )
+        # 所有重试都失败
+        raise last_error or Exception("智谱 API 调用失败")
     
     async def _call_openai(
         self,

@@ -95,6 +95,11 @@
                 JSON 预览
               </h3>
               <div class="card-actions">
+                <button class="icon-btn" @click="openJsonEditor" title="展开编辑">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/>
+                  </svg>
+                </button>
                 <button class="icon-btn" @click="copyJson" title="复制">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <rect x="9" y="9" width="13" height="13" rx="2"/>
@@ -168,6 +173,26 @@
     </div>
     
     <a-modal
+      v-model:open="showJsonEditor"
+      title="JSON 配置"
+      :width="760"
+      :maskClosable="false"
+      wrapClassName="json-editor-modal"
+    >
+      <textarea
+        v-model="jsonEditorText"
+        class="json-editor-textarea"
+        rows="18"
+        spellcheck="false"
+      ></textarea>
+      <p v-if="jsonEditorError" class="json-editor-error">{{ jsonEditorError }}</p>
+      <template #footer>
+        <a-button @click="showJsonEditor = false">取消</a-button>
+        <a-button type="primary" @click="applyJsonEditor">应用</a-button>
+      </template>
+    </a-modal>
+    
+    <a-modal
       v-model:open="showLeaveConfirm"
       title="未保存的更改"
       :maskClosable="false"
@@ -212,6 +237,9 @@ const pendingAIConfig = ref(null)
 const validationErrors = ref({})
 const streamingContent = ref('')
 const showLeaveConfirm = ref(false)
+const showJsonEditor = ref(false)
+const jsonEditorText = ref('')
+const jsonEditorError = ref('')
 let pendingLeaveNext = null
 let pollTimer = null
 
@@ -232,6 +260,72 @@ const jsonPreview = computed(() => {
   }
   return JSON.stringify(result, null, 2)
 })
+
+const openJsonEditor = () => {
+  jsonEditorText.value = jsonPreview.value
+  jsonEditorError.value = ''
+  showJsonEditor.value = true
+}
+
+const normalizeLocaleValue = (value) => {
+  if (value && typeof value === 'object') {
+    return {
+      'zh-CN': value['zh-CN'] || '',
+      en: value.en || ''
+    }
+  }
+  if (typeof value === 'string') {
+    return { 'zh-CN': value, en: '' }
+  }
+  return { 'zh-CN': '', en: '' }
+}
+
+const normalizeStringArray = (value) => {
+  if (!Array.isArray(value)) return []
+  return value
+    .map(item => (item == null ? '' : String(item)))
+    .filter(item => item.trim())
+}
+
+const applyJsonEditor = () => {
+  jsonEditorError.value = ''
+  let parsed = null
+  try {
+    parsed = JSON.parse(jsonEditorText.value)
+  } catch (error) {
+    jsonEditorError.value = 'JSON 格式错误，请检查后重试'
+    return
+  }
+
+  if (!parsed || typeof parsed !== 'object' || !parsed.pages || typeof parsed.pages !== 'object') {
+    jsonEditorError.value = 'JSON 结构错误，需要包含 pages 对象'
+    return
+  }
+
+  const entries = Object.entries(parsed.pages)
+  if (entries.length === 0) {
+    jsonEditorError.value = 'pages 不能为空'
+    return
+  }
+
+  const [pageId, pageData] = entries[0]
+  if (!pageId || typeof pageId !== 'string') {
+    jsonEditorError.value = '页面 ID 无效'
+    return
+  }
+
+  const payload = pageData || {}
+  store.applyUserEdit({
+    page_id: pageId,
+    name: normalizeLocaleValue(payload.name),
+    description: normalizeLocaleValue(payload.description),
+    button_list: normalizeStringArray(payload.buttonList || payload.button_list),
+    optional_actions: normalizeStringArray(payload.optionalActions || payload.optional_actions)
+  })
+
+  showJsonEditor.value = false
+  message.success('JSON 已应用到表单')
+}
 
 onMounted(async () => {
   store.resetConfig()
@@ -899,6 +993,50 @@ watch(() => route.path, () => {
     white-space: pre-wrap;
     word-break: break-all;
   }
+}
+
+.json-editor-textarea {
+  width: 100%;
+  border: 1px solid #1f2937;
+  border-radius: 10px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.7;
+  padding: 14px;
+  resize: vertical;
+}
+
+.json-editor-error {
+  margin: 10px 4px 0;
+  color: #f87171;
+  font-size: 12px;
+}
+
+:deep(.json-editor-modal .ant-modal-content) {
+  background: #0b1120;
+}
+
+:deep(.json-editor-modal .ant-modal-header) {
+  background: #0b1120;
+  border-bottom: 1px solid #1f2937;
+}
+
+:deep(.json-editor-modal .ant-modal-title) {
+  color: #e2e8f0;
+}
+
+:deep(.json-editor-modal .ant-modal-close) {
+  color: #94a3b8;
+}
+
+:deep(.json-editor-modal .ant-modal-body) {
+  padding: 16px 20px 8px;
+}
+
+:deep(.json-editor-modal .ant-modal-footer) {
+  border-top: 1px solid #1f2937;
 }
 
 .config-card {
