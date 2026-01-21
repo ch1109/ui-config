@@ -41,10 +41,11 @@ function mergeAiContextToDescriptionEn(description, aiContext) {
 
 export const useUiConfigStore = defineStore('uiConfig', () => {
   // 当前编辑的配置（ai_context 已废弃，数据合并到 description）
+  // 支持多语言：zh-CN, en, ja, ms, zh-TW
   const draftConfig = ref({
     page_id: '',
-    name: { 'zh-CN': '', en: '' },
-    description: { 'zh-CN': '', en: '' },
+    name: { 'zh-CN': '', en: '', ja: '', ms: '', 'zh-TW': '' },
+    description: { 'zh-CN': '', en: '', ja: '', ms: '', 'zh-TW': '' },
     button_list: [],
     optional_actions: []
   })
@@ -96,7 +97,10 @@ export const useUiConfigStore = defineStore('uiConfig', () => {
     if (aiConfig.page_name) {
       draftConfig.value.name = {
         'zh-CN': aiConfig.page_name['zh-CN'] || '',
-        en: aiConfig.page_name.en || ''
+        en: aiConfig.page_name.en || '',
+        ja: aiConfig.page_name.ja || '',
+        ms: aiConfig.page_name.ms || '',
+        'zh-TW': aiConfig.page_name['zh-TW'] || ''
       }
     }
     if (aiConfig.page_description) {
@@ -109,7 +113,10 @@ export const useUiConfigStore = defineStore('uiConfig', () => {
       }
       draftConfig.value.description = {
         'zh-CN': descZh,
-        en: descEn
+        en: descEn,
+        ja: aiConfig.page_description.ja || '',
+        ms: aiConfig.page_description.ms || '',
+        'zh-TW': aiConfig.page_description['zh-TW'] || ''
       }
     }
     if (aiConfig.button_list) {
@@ -129,8 +136,8 @@ export const useUiConfigStore = defineStore('uiConfig', () => {
   function resetConfig() {
     draftConfig.value = {
       page_id: '',
-      name: { 'zh-CN': '', en: '' },
-      description: { 'zh-CN': '', en: '' },
+      name: { 'zh-CN': '', en: '', ja: '', ms: '', 'zh-TW': '' },
+      description: { 'zh-CN': '', en: '', ja: '', ms: '', 'zh-TW': '' },
       button_list: [],
       optional_actions: []
     }
@@ -143,17 +150,33 @@ export const useUiConfigStore = defineStore('uiConfig', () => {
   function setOriginalConfig(config) {
     // 兼容旧数据：如果有 ai_context，合并到 description（中文和英文）
     const normalizedConfig = { ...config }
-    if (config.ai_context && config.description) {
-      normalizedConfig.description = {
-        'zh-CN': mergeAiContextToDescriptionZh(
-          config.description['zh-CN'] || '',
-          config.ai_context
-        ),
-        en: mergeAiContextToDescriptionEn(
-          config.description.en || '',
-          config.ai_context
-        )
-      }
+    
+    // 确保 name 和 description 包含所有语言字段
+    normalizedConfig.name = {
+      'zh-CN': config.name?.['zh-CN'] || '',
+      en: config.name?.en || '',
+      ja: config.name?.ja || '',
+      ms: config.name?.ms || '',
+      'zh-TW': config.name?.['zh-TW'] || ''
+    }
+    
+    normalizedConfig.description = {
+      'zh-CN': config.description?.['zh-CN'] || '',
+      en: config.description?.en || '',
+      ja: config.description?.ja || '',
+      ms: config.description?.ms || '',
+      'zh-TW': config.description?.['zh-TW'] || ''
+    }
+    
+    if (config.ai_context) {
+      normalizedConfig.description['zh-CN'] = mergeAiContextToDescriptionZh(
+        normalizedConfig.description['zh-CN'],
+        config.ai_context
+      )
+      normalizedConfig.description.en = mergeAiContextToDescriptionEn(
+        normalizedConfig.description.en,
+        config.ai_context
+      )
     }
     // 移除 ai_context 字段
     delete normalizedConfig.ai_context

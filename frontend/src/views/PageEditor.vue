@@ -271,13 +271,16 @@ const normalizeLocaleValue = (value) => {
   if (value && typeof value === 'object') {
     return {
       'zh-CN': value['zh-CN'] || '',
-      en: value.en || ''
+      en: value.en || '',
+      ja: value.ja || '',
+      ms: value.ms || '',
+      'zh-TW': value['zh-TW'] || ''
     }
   }
   if (typeof value === 'string') {
-    return { 'zh-CN': value, en: '' }
+    return { 'zh-CN': value, en: '', ja: '', ms: '', 'zh-TW': '' }
   }
-  return { 'zh-CN': '', en: '' }
+  return { 'zh-CN': '', en: '', ja: '', ms: '', 'zh-TW': '' }
 }
 
 const normalizeStringArray = (value) => {
