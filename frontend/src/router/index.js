@@ -2,6 +2,12 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 const routes = [
   {
+    path: '/intent',
+    name: 'IntentConfig',
+    component: () => import('@/views/IntentConfig.vue'),
+    meta: { title: '意图配置' }
+  },
+  {
     path: '/',
     name: 'PageList',
     component: () => import('@/views/PageList.vue'),

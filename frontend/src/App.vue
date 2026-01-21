@@ -39,6 +39,16 @@
             mode="inline"
             :inline-collapsed="collapsed"
           >
+            <a-menu-item key="/intent">
+              <template #icon>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="nav-icon">
+                  <circle cx="12" cy="12" r="10"/>
+                  <path d="M12 16v-4M12 8h.01"/>
+                </svg>
+              </template>
+              <router-link to="/intent">意图配置</router-link>
+            </a-menu-item>
+            
             <a-menu-item key="/">
               <template #icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="nav-icon">
@@ -142,6 +152,8 @@ watch(
     // 处理动态路由
     if (path.startsWith('/page/')) {
       selectedKeys.value = ['/'];
+    } else if (path === '/intent') {
+      selectedKeys.value = ['/intent'];
     } else {
       selectedKeys.value = [path];
     }

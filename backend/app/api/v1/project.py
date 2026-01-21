@@ -38,9 +38,10 @@ async def list_projects(db: AsyncSession = Depends(get_db)):
         page_count = row[1]
         projects.append(ProjectListItem(
             id=project.id,
+            project_id=project.project_id,
             name=project.name,
             description=project.description,
-            color=project.color or "#6366f1",
+            color=project.color or "#3b82f6",
             icon=project.icon or "folder",
             page_count=page_count,
             created_at=project.created_at
@@ -71,9 +72,10 @@ async def get_project(project_id: int, db: AsyncSession = Depends(get_db)):
     
     return ProjectResponse(
         id=project.id,
+        project_id=project.project_id,
         name=project.name,
         description=project.description,
-        color=project.color or "#6366f1",
+        color=project.color or "#3b82f6",
         icon=project.icon or "folder",
         page_count=page_count,
         created_at=project.created_at,
@@ -87,6 +89,18 @@ async def create_project(
     db: AsyncSession = Depends(get_db)
 ):
     """创建新项目"""
+    # 检查 project_id 是否重复
+    result = await db.execute(
+        select(Project).where(Project.project_id == project_data.project_id)
+    )
+    existing = result.scalar_one_or_none()
+    
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"项目 ID '{project_data.project_id}' 已存在"
+        )
+    
     # 检查名称是否重复
     result = await db.execute(
         select(Project).where(Project.name == project_data.name)
@@ -100,9 +114,10 @@ async def create_project(
         )
     
     project = Project(
+        project_id=project_data.project_id,
         name=project_data.name,
         description=project_data.description,
-        color=project_data.color or "#6366f1",
+        color=project_data.color or "#3b82f6",
         icon=project_data.icon or "folder"
     )
     
@@ -112,6 +127,7 @@ async def create_project(
     
     return ProjectResponse(
         id=project.id,
+        project_id=project.project_id,
         name=project.name,
         description=project.description,
         color=project.color,
@@ -175,6 +191,7 @@ async def update_project(
     
     return ProjectResponse(
         id=project.id,
+        project_id=project.project_id,
         name=project.name,
         description=project.description,
         color=project.color,
@@ -213,4 +230,3 @@ async def delete_project(
     await db.commit()
     
     return {"success": True, "message": f"项目 '{project.name}' 已删除"}
-

@@ -16,6 +16,13 @@ class Project(Base):
     __tablename__ = "projects"
     
     id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(
+        String(50),
+        unique=True,
+        nullable=False,
+        index=True,
+        comment="项目唯一标识 (格式: proj_xxx)"
+    )
     name = Column(
         String(100), 
         nullable=False,
@@ -27,7 +34,7 @@ class Project(Base):
     )
     color = Column(
         String(20),
-        default="#6366f1",
+        default="#3b82f6",
         comment="项目标识颜色 (用于前端展示)"
     )
     icon = Column(
@@ -50,5 +57,4 @@ class Project(Base):
     pages = relationship("PageConfig", back_populates="project", lazy="dynamic")
     
     def __repr__(self):
-        return f"<Project(id={self.id}, name={self.name})>"
-
+        return f"<Project(id={self.id}, project_id={self.project_id}, name={self.name})>"
