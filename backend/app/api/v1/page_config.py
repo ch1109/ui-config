@@ -378,6 +378,117 @@ async def get_parse_status(session_id: str, db: AsyncSession = Depends(get_db)):
     return response
 
 
+@router.get("/check-duplicate")
+async def check_duplicate_page(
+    page_id: str,
+    name_zh: Optional[str] = None,
+    exclude_page_id: Optional[str] = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    检查是否存在同名页面（页面 ID 或页面名称重复）
+    
+    - page_id: 要检查的页面 ID
+    - name_zh: 要检查的页面中文名称（可选）
+    - exclude_page_id: 排除的页面 ID（用于编辑时排除自身）
+    
+    返回:
+    - exists: 是否存在重复
+    - conflict_type: 冲突类型 (page_id / name / both)
+    - existing_page: 已存在页面的详细信息
+    """
+    conflicts = []
+    existing_page = None
+    
+    # 检查页面 ID 是否存在
+    query = select(PageConfig, Project.name.label("project_name")).outerjoin(
+        Project, PageConfig.project_id == Project.id
+    ).where(PageConfig.page_id == page_id)
+    
+    if exclude_page_id:
+        query = query.where(PageConfig.page_id != exclude_page_id)
+    
+    result = await db.execute(query)
+    row = result.first()
+    
+    if row:
+        page = row[0]
+        project_name = row[1]
+        conflicts.append("page_id")
+        existing_page = {
+            "id": page.id,
+            "page_id": page.page_id,
+            "name": {
+                "zh-CN": page.name_zh or "",
+                "en": page.name_en or ""
+            },
+            "description": {
+                "zh-CN": page.description_zh or "",
+                "en": page.description_en or ""
+            },
+            "button_list": page.button_list or [],
+            "optional_actions": page.optional_actions or [],
+            "screenshot_url": page.screenshot_url,
+            "project_id": page.project_id,
+            "project_name": project_name,
+            "status": page.status,
+            "created_at": page.created_at.isoformat() if page.created_at else None,
+            "updated_at": page.updated_at.isoformat() if page.updated_at else None
+        }
+    
+    # 如果提供了名称，也检查名称是否重复
+    if name_zh and not existing_page:
+        query = select(PageConfig, Project.name.label("project_name")).outerjoin(
+            Project, PageConfig.project_id == Project.id
+        ).where(PageConfig.name_zh == name_zh)
+        
+        if exclude_page_id:
+            query = query.where(PageConfig.page_id != exclude_page_id)
+        
+        result = await db.execute(query)
+        row = result.first()
+        
+        if row:
+            page = row[0]
+            project_name = row[1]
+            conflicts.append("name")
+            existing_page = {
+                "id": page.id,
+                "page_id": page.page_id,
+                "name": {
+                    "zh-CN": page.name_zh or "",
+                    "en": page.name_en or ""
+                },
+                "description": {
+                    "zh-CN": page.description_zh or "",
+                    "en": page.description_en or ""
+                },
+                "button_list": page.button_list or [],
+                "optional_actions": page.optional_actions or [],
+                "screenshot_url": page.screenshot_url,
+                "project_id": page.project_id,
+                "project_name": project_name,
+                "status": page.status,
+                "created_at": page.created_at.isoformat() if page.created_at else None,
+                "updated_at": page.updated_at.isoformat() if page.updated_at else None
+            }
+    
+    if not conflicts:
+        return {
+            "exists": False,
+            "conflict_type": None,
+            "existing_page": None
+        }
+    
+    conflict_type = "both" if len(conflicts) > 1 else conflicts[0]
+    
+    return {
+        "exists": True,
+        "conflict_type": conflict_type,
+        "existing_page": existing_page
+    }
+
+
 @router.get("", response_model=List[PageConfigListItem])
 async def list_pages(
     page_status: Optional[str] = None,

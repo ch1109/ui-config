@@ -59,7 +59,7 @@ class ChatRequest(BaseModel):
     max_tokens: int = 4096
     
     # ReAct 配置
-    max_iterations: int = 10
+    max_iterations: int = 5
     stream: bool = True
 
 
@@ -170,6 +170,13 @@ async def chat(session_id: str, request: ChatRequest):
     
     支持流式响应，实时返回推理步骤和工具调用结果
     """
+    logger.info(
+        "MCP Host chat request: session_id=%s provider=%s model=%s max_iterations=%s",
+        session_id,
+        request.llm_provider,
+        request.llm_model,
+        request.max_iterations
+    )
     # 构建 LLM 配置
     llm_config = LLMConfig(
         provider=request.llm_provider,
@@ -180,6 +187,11 @@ async def chat(session_id: str, request: ChatRequest):
         max_tokens=request.max_tokens
     )
     
+    context = react_engine.get_context(session_id)
+    if not context:
+        context = react_engine.create_context(session_id)
+    context.max_iterations = request.max_iterations
+
     if request.stream:
         # 流式响应
         async def generate():

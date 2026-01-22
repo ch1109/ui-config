@@ -252,6 +252,12 @@ class SamplingService:
         self._http_client: Optional[httpx.AsyncClient] = None
         self._approval_callbacks: Dict[str, Callable[[SamplingRequest], Awaitable[bool]]] = {}
         self._lock = asyncio.Lock()
+        self._zhipu_semaphore = asyncio.Semaphore(2)
+        self._zhipu_rate_lock = asyncio.Lock()
+        self._zhipu_next_ts = 0.0
+        self._zhipu_min_interval_seconds = 6.0
+        self._zhipu_request_times: List[float] = []
+        self._zhipu_max_per_minute = 8
     
     async def _get_http_client(self) -> httpx.AsyncClient:
         """获取 HTTP 客户端"""
@@ -625,11 +631,13 @@ class SamplingService:
         last_error = None
         for attempt in range(max_retries + 1):
             try:
-                response = await client.post(
-                    f"{url}/chat/completions",
-                    headers=headers,
-                    json=payload
-                )
+                await self._await_zhipu_rate_limit()
+                async with self._zhipu_semaphore:
+                    response = await client.post(
+                        f"{url}/chat/completions",
+                        headers=headers,
+                        json=payload
+                    )
                 response.raise_for_status()
                 
                 result = response.json()
@@ -695,6 +703,26 @@ class SamplingService:
         
         # 所有重试都失败
         raise last_error or Exception("智谱 API 调用失败")
+
+    async def _await_zhipu_rate_limit(self) -> None:
+        """智谱请求最小间隔，避免短时间突发限流"""
+        async with self._zhipu_rate_lock:
+            loop = asyncio.get_running_loop()
+            while True:
+                now = loop.time()
+                self._zhipu_request_times = [
+                    t for t in self._zhipu_request_times if now - t < 60.0
+                ]
+                wait_until = self._zhipu_next_ts
+                if len(self._zhipu_request_times) >= self._zhipu_max_per_minute:
+                    wait_until = max(wait_until, self._zhipu_request_times[0] + 60.0)
+                wait_seconds = wait_until - now
+                if wait_seconds <= 0:
+                    self._zhipu_next_ts = now + self._zhipu_min_interval_seconds
+                    self._zhipu_request_times.append(now)
+                    return
+                logger.warning(f"智谱请求过密，等待 {wait_seconds:.1f} 秒后继续")
+                await asyncio.sleep(wait_seconds)
     
     async def _call_openai(
         self,

@@ -123,6 +123,14 @@ export const pageConfigApi = {
   saveDraft: (data) => api.post('/pages/draft', data),
   delete: (pageId) => api.delete(`/pages/${pageId}`),
   
+  // 检查是否存在同名页面
+  checkDuplicate: (pageId, nameZh = null, excludePageId = null) => {
+    const params = { page_id: pageId }
+    if (nameZh) params.name_zh = nameZh
+    if (excludePageId) params.exclude_page_id = excludePageId
+    return api.get('/pages/check-duplicate', { params })
+  },
+  
   // 图片上传
   uploadImage: async (file, onProgress) => {
     // 先尝试稳定化读取文件到内存，避免后续上传时文件被系统修改

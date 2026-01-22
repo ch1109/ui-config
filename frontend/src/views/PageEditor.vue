@@ -208,6 +208,17 @@
         <a-button type="primary" :loading="isSaving" @click="handleLeaveSaveConfig">保存配置</a-button>
       </template>
     </a-modal>
+    
+    <!-- 同名页面确认弹窗 -->
+    <DuplicatePageModal
+      v-model:visible="showDuplicateModal"
+      :existing-page="duplicateExistingPage"
+      :current-config="store.draftConfig"
+      @cancel="handleDuplicateCancel"
+      @config-changed="handleDuplicateConfigChanged"
+      @save-draft="handleDuplicateSaveDraft"
+      @replace-save="handleDuplicateReplaceSave"
+    />
   </div>
 </template>
 
@@ -222,6 +233,7 @@ import { ExclamationCircleOutlined } from '@ant-design/icons-vue'
 import ImageUploader from '@/components/PageConfig/ImageUploader.vue'
 import ConfigEditor from '@/components/PageConfig/ConfigEditor.vue'
 import ClarifyPanel from '@/components/AIAssistant/ClarifyPanel.vue'
+import DuplicatePageModal from '@/components/PageConfig/DuplicatePageModal.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -244,6 +256,9 @@ const streamingContent = ref('')
 const summaryContent = ref('')  // 第一阶段：分析总结内容
 const showLeaveConfirm = ref(false)
 const showJsonEditor = ref(false)
+const showDuplicateModal = ref(false)
+const duplicateExistingPage = ref(null)
+const pendingSaveAction = ref(null)  // 'save' | 'draft'
 const jsonEditorText = ref('')
 const jsonEditorError = ref('')
 let pendingLeaveNext = null
@@ -609,11 +624,104 @@ const saveDraft = async ({ redirect = true } = {}) => {
 }
 
 const handleSave = async () => {
+  // 先检查是否存在同名页面
+  if (isNew.value) {
+    const pageId = store.draftConfig.page_id?.trim()
+    const nameZh = store.draftConfig.name?.['zh-CN']?.trim()
+    
+    if (pageId) {
+      try {
+        const result = await pageConfigApi.checkDuplicate(pageId, nameZh)
+        if (result.exists) {
+          // 存在同名页面，显示确认弹窗
+          duplicateExistingPage.value = result.existing_page
+          pendingSaveAction.value = 'save'
+          showDuplicateModal.value = true
+          return
+        }
+      } catch (error) {
+        console.error('检查同名页面失败:', error)
+        // 检查失败时继续保存
+      }
+    }
+  }
+  
   await saveConfig()
 }
 
 const handleSaveDraft = async () => {
+  // 先检查是否存在同名页面
+  if (isNew.value) {
+    const pageId = store.draftConfig.page_id?.trim()
+    const nameZh = store.draftConfig.name?.['zh-CN']?.trim()
+    
+    if (pageId) {
+      try {
+        const result = await pageConfigApi.checkDuplicate(pageId, nameZh)
+        if (result.exists) {
+          // 存在同名页面，显示确认弹窗
+          duplicateExistingPage.value = result.existing_page
+          pendingSaveAction.value = 'draft'
+          showDuplicateModal.value = true
+          return
+        }
+      } catch (error) {
+        console.error('检查同名页面失败:', error)
+        // 检查失败时继续保存
+      }
+    }
+  }
+  
   await saveDraft()
+}
+
+// 弹窗中修改配置后的回调
+const handleDuplicateConfigChanged = (newData) => {
+  // 更新 store 中的配置
+  if (newData.page_id) {
+    store.draftConfig.page_id = newData.page_id
+  }
+  if (newData.name_zh) {
+    store.draftConfig.name['zh-CN'] = newData.name_zh
+  }
+  if (newData.description_zh) {
+    store.draftConfig.description['zh-CN'] = newData.description_zh
+  }
+}
+
+// 弹窗中点击保存草稿
+const handleDuplicateSaveDraft = async (modifiedData) => {
+  // 更新配置
+  handleDuplicateConfigChanged(modifiedData)
+  
+  // 关闭弹窗
+  showDuplicateModal.value = false
+  
+  // 执行保存草稿
+  await saveDraft()
+}
+
+// 弹窗中点击替换保存
+const handleDuplicateReplaceSave = async (modifiedData) => {
+  // 更新配置
+  handleDuplicateConfigChanged(modifiedData)
+  
+  // 关闭弹窗
+  showDuplicateModal.value = false
+  
+  // 根据原来的操作类型执行保存
+  if (pendingSaveAction.value === 'save') {
+    await saveConfig()
+  } else {
+    await saveDraft()
+  }
+}
+
+// 弹窗取消
+const handleDuplicateCancel = () => {
+  showDuplicateModal.value = false
+  duplicateExistingPage.value = null
+  pendingSaveAction.value = null
 }
 
 const copyJson = async () => {

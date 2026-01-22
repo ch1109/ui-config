@@ -71,7 +71,7 @@ class ReActContext:
 @dataclass
 class LLMConfig:
     """LLM 配置"""
-    provider: str = "openai"  # openai, anthropic, ollama, zhipu
+    provider: str = "openai"  # openai, anthropic, ollama, zhipu, qwen
     model: str = "gpt-4o"
     api_key: Optional[str] = None
     base_url: Optional[str] = None
@@ -94,6 +94,12 @@ class ReActEngine:
     def __init__(self):
         self.contexts: Dict[str, ReActContext] = {}
         self._http_client: Optional[httpx.AsyncClient] = None
+        self._zhipu_semaphore = asyncio.Semaphore(1)
+        self._zhipu_rate_lock = asyncio.Lock()
+        self._zhipu_next_ts = 0.0
+        self._zhipu_min_interval_seconds = 6.0
+        self._zhipu_request_times: List[float] = []
+        self._zhipu_max_per_minute = 8
         
     async def _get_http_client(self) -> httpx.AsyncClient:
         """获取 HTTP 客户端"""
@@ -187,6 +193,8 @@ class ReActEngine:
             return await self._call_ollama(client, messages, tools, config)
         elif config.provider == "zhipu":
             return await self._call_zhipu(client, messages, tools, config)
+        elif config.provider == "qwen":
+            return await self._call_qwen(client, messages, tools, config)
         else:
             raise ValueError(f"Unsupported LLM provider: {config.provider}")
     
@@ -393,11 +401,13 @@ class ReActEngine:
         last_error = None
         for attempt in range(max_retries + 1):
             try:
-                response = await client.post(
-                    f"{base_url}/chat/completions",
-                    headers=headers,
-                    json=payload
-                )
+                await self._await_zhipu_rate_limit()
+                async with self._zhipu_semaphore:
+                    response = await client.post(
+                        f"{base_url}/chat/completions",
+                        headers=headers,
+                        json=payload
+                    )
                 response.raise_for_status()
                 
                 result = response.json()
@@ -446,6 +456,87 @@ class ReActEngine:
         
         # 所有重试都失败
         raise last_error or Exception("智谱 API 调用失败")
+
+    async def _call_qwen(
+        self,
+        client: httpx.AsyncClient,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]],
+        config: LLMConfig
+    ) -> Dict[str, Any]:
+        """调用 Qwen API（支持本地部署和 DashScope）"""
+        from app.core.config import settings
+        
+        # 支持本地部署（如 http://192.168.3.183/v1）或 DashScope
+        base_url = config.base_url or "http://192.168.3.183/v1"
+        model = config.model or "qwen3-30b"
+        
+        # 判断是否为本地部署（不包含 dashscope 或 aliyun）
+        is_local = "dashscope" not in base_url and "aliyun" not in base_url
+        
+        # 构建请求头
+        headers = {
+            "Content-Type": "application/json"
+        }
+        
+        # 本地部署需要 Model header
+        if is_local:
+            headers["Model"] = model
+        
+        # 如果有 API Key（DashScope 模式），添加 Authorization
+        api_key = config.api_key or settings.DASHSCOPE_API_KEY
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": config.temperature,
+            "max_tokens": config.max_tokens
+        }
+        
+        # 本地部署的 Qwen 不支持 tools/function calling，只有 DashScope 支持
+        if tools and not is_local:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+        
+        response = await client.post(
+            f"{base_url}/chat/completions",
+            headers=headers,
+            json=payload
+        )
+        response.raise_for_status()
+        
+        result = response.json()
+        choice = result["choices"][0]
+        message = choice["message"]
+        
+        return {
+            "content": message.get("content", ""),
+            "tool_calls": message.get("tool_calls", []),
+            "finish_reason": choice.get("finish_reason", "stop"),
+            "usage": result.get("usage", {})
+        }
+
+    async def _await_zhipu_rate_limit(self) -> None:
+        """智谱请求最小间隔，避免短时间突发限流"""
+        async with self._zhipu_rate_lock:
+            loop = asyncio.get_running_loop()
+            while True:
+                now = loop.time()
+                self._zhipu_request_times = [
+                    t for t in self._zhipu_request_times if now - t < 60.0
+                ]
+                wait_until = self._zhipu_next_ts
+                if len(self._zhipu_request_times) >= self._zhipu_max_per_minute:
+                    wait_until = max(wait_until, self._zhipu_request_times[0] + 60.0)
+                wait_seconds = wait_until - now
+                if wait_seconds <= 0:
+                    self._zhipu_next_ts = now + self._zhipu_min_interval_seconds
+                    self._zhipu_request_times.append(now)
+                    return
+                logger.warning(f"智谱请求过密，等待 {wait_seconds:.1f} 秒后继续")
+                await asyncio.sleep(wait_seconds)
     
     def parse_tool_calls(
         self,
