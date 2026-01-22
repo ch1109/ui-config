@@ -134,6 +134,7 @@
             </div>
             <div class="card-body">
               <ConfigEditor
+                ref="configEditorRef"
                 :config="store.draftConfig"
                 :session-id="currentSessionId"
                 :errors="validationErrors"
@@ -162,9 +163,11 @@
                 :current-config="store.draftConfig"
                 :image-url="imageUrl"
                 :streaming-content="streamingContent"
+                :summary-content="summaryContent"
                 @config-updated="onAIConfigUpdated"
                 @config-confirmed="onAIConfigConfirmed"
                 @completed="onAICompleted"
+                @button-added="onButtonAdded"
               />
             </div>
           </div>
@@ -226,8 +229,10 @@ const store = useUiConfigStore()
 
 const isNew = computed(() => route.name === 'PageCreate')
 const imageUrl = ref('')
+const projectId = ref(null)  // 当前页面所属的项目 ID
 const currentSessionId = ref('')
 const parseResult = ref(null)
+const configEditorRef = ref(null)
 const parseStatus = ref('')
 const isParsing = ref(false)
 const isSaving = ref(false)
@@ -236,6 +241,7 @@ const showAIPanel = ref(false)
 const pendingAIConfig = ref(null)
 const validationErrors = ref({})
 const streamingContent = ref('')
+const summaryContent = ref('')  // 第一阶段：分析总结内容
 const showLeaveConfirm = ref(false)
 const showJsonEditor = ref(false)
 const jsonEditorText = ref('')
@@ -332,6 +338,12 @@ const applyJsonEditor = () => {
 
 onMounted(async () => {
   store.resetConfig()
+  
+  // 从 URL query 参数获取项目 ID（新建页面时）
+  if (route.query.project) {
+    projectId.value = parseInt(route.query.project, 10)
+  }
+  
   if (!isNew.value && route.params.id) {
     try {
       const response = await pageConfigApi.get(route.params.id)
@@ -344,6 +356,8 @@ onMounted(async () => {
         optional_actions: response.optional_actions || []
       })
       imageUrl.value = response.screenshot_url || ''
+      // 编辑时保存原有的项目 ID
+      projectId.value = response.project_id || null
     } catch (error) {
       console.error('Failed to load page:', error)
       message.error('加载页面失败')
@@ -362,7 +376,7 @@ const onUploadError = (error) => {
   message.error(error.message || '上传失败')
 }
 
-// AI Parse
+// AI Parse - 支持两阶段工作流程
 const handleAIParse = async () => {
   if (!imageUrl.value) {
     message.warning('请先上传页面截图')
@@ -373,27 +387,43 @@ const handleAIParse = async () => {
   showAIPanel.value = true
   parseStatus.value = 'parsing'
   streamingContent.value = ''
+  summaryContent.value = ''
   
   try {
     const stream = pageConfigApi.parseStream(
       imageUrl.value,
+      // onMessage: 流式内容
       (data) => {
         if (data.type === 'content') {
           streamingContent.value += data.content
         }
       },
-      (result) => {
+      // onComplete: 第二阶段完成，收到 JSON 配置
+      (result, sessionId) => {
         isParsing.value = false
         parseStatus.value = 'completed'
         parseResult.value = result
         streamingContent.value = ''
+        summaryContent.value = ''
+        if (sessionId) currentSessionId.value = sessionId
         message.success('AI 解析完成')
       },
+      // onError: 错误处理
       (error) => {
         isParsing.value = false
         parseStatus.value = 'failed'
         streamingContent.value = ''
+        summaryContent.value = ''
         message.error(error || '解析失败')
+      },
+      // onSummary: 第一阶段完成，收到分析总结
+      (summary, sessionId) => {
+        isParsing.value = false
+        parseStatus.value = 'summarized'  // 新状态：已输出分析总结，等待用户确认
+        summaryContent.value = summary
+        streamingContent.value = ''
+        if (sessionId) currentSessionId.value = sessionId  // 保存 sessionId 用于后续对话
+        // 不显示 message，让用户在聊天面板中确认
       }
     )
     window._currentParseStream = stream
@@ -441,6 +471,13 @@ const onAIConfigConfirmed = (config) => {
 const onAICompleted = () => {
   isParsing.value = false
   if (pollTimer) clearInterval(pollTimer)
+}
+
+// 处理从 ClarifyPanel 添加新按钮后刷新 ConfigEditor 的按钮列表
+const onButtonAdded = () => {
+  if (configEditorRef.value?.loadButtonOptions) {
+    configEditorRef.value.loadButtonOptions()
+  }
 }
 
 const onConfigChanged = (config) => {
@@ -504,7 +541,8 @@ const saveConfig = async ({ redirect = true } = {}) => {
       description: config.description,
       button_list: config.button_list.filter(b => b.trim()),
       optional_actions: config.optional_actions.filter(a => a.trim()),
-      screenshot_url: imageUrl.value
+      screenshot_url: imageUrl.value,
+      project_id: projectId.value  // 保存项目关联
     }
     
     if (isNew.value) {
@@ -549,7 +587,8 @@ const saveDraft = async ({ redirect = true } = {}) => {
       description: config.description,
       button_list: config.button_list,
       optional_actions: config.optional_actions,
-      screenshot_url: imageUrl.value
+      screenshot_url: imageUrl.value,
+      project_id: projectId.value  // 保存项目关联
     }
     
     await pageConfigApi.saveDraft(saveData)

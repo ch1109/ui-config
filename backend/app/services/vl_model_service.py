@@ -13,7 +13,7 @@ import ssl
 import os
 from typing import Optional, Dict, Any, List, AsyncGenerator
 from urllib.parse import urlparse
-from app.schemas.vl_response import VLParseResult, ParsedElement
+from app.schemas.vl_response import VLParseResult, ParsedElement, UnrecognizedButton
 from app.core.config import settings
 from app.core.exceptions import SSRFProtectionError, InvalidFileTypeError
 import logging
@@ -64,16 +64,18 @@ class VLModelService:
     功能: 语义级解析 - 元素识别 + 交互意图 + 业务含义推断
     """
     
-    def __init__(self, selected_model: Optional[str] = None):
+    def __init__(self, selected_model: Optional[str] = None, available_buttons: Optional[List[str]] = None):
         """
         初始化 VL 模型服务
         
         Args:
             selected_model: 指定使用的模型，可选值: "glm-4.6v", "qwen2.5-vl-7b"
                            如果为 None，则使用环境变量配置的默认模型
+            available_buttons: 系统中可用的按钮 ID 列表，用于验证 AI 返回的按钮
         """
         self.timeout = settings.VL_TIMEOUT
         self.selected_model = selected_model
+        self.available_buttons = set(available_buttons) if available_buttons else None
         
         # 如果指定了模型，优先使用指定的模型
         if selected_model == "qwen2.5-vl-7b":
@@ -350,28 +352,124 @@ class VLModelService:
         使用 Qwen2.5-VL-7B 本地部署接口流式解析图片
         
         注: 本地接口可能不支持真正的流式输出，这里使用非流式调用并模拟流式返回
+        支持两阶段工作流程：分析总结（summary）和最终配置（complete）
         """
         try:
             yield f"data: {json.dumps({'type': 'start', 'message': '正在使用 Qwen2.5-VL-7B 分析图片...'})}\n\n"
             
-            # 调用非流式接口
-            result = await self._parse_image_qwen_local(image_url, system_prompt)
+            # 读取图片文件
+            image_bytes = await self._load_image_bytes(image_url)
             
-            # 模拟流式输出完整的 JSON 响应
-            result_json = json.dumps(result.model_dump(), ensure_ascii=False)
+            # 获取图片的实际类型
+            content_type = "image/png"
+            filename = "image.png"
+            if image_url.lower().endswith(('.jpg', '.jpeg')):
+                content_type = "image/jpeg"
+                filename = "image.jpg"
             
-            # 分块输出内容
+            # 构建 messages JSON
+            prompt_text = f"{system_prompt}\n\n{self._build_parse_prompt()}"
+            messages_data = {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt_text},
+                            {"type": "image_url", "image_url": {"uri": ""}}
+                        ]
+                    }
+                ]
+            }
+            
+            async with httpx.AsyncClient(timeout=self.timeout, verify=SSL_VERIFY) as client:
+                files = {
+                    "image_file": (filename, image_bytes, content_type)
+                }
+                data = {
+                    "messages": json.dumps(messages_data, ensure_ascii=False)
+                }
+                headers = {
+                    "Authorization": self.api_key
+                }
+                
+                response = await client.post(
+                    self.api_endpoint,
+                    files=files,
+                    data=data,
+                    headers=headers
+                )
+                
+                if response.status_code != 200:
+                    raise Exception(f"Qwen API 调用失败: {response.status_code}")
+                
+                result = response.json()
+            
+            # 提取响应内容
+            content = self._extract_qwen_response_content(result)
+            
+            if not content or content.strip() == "":
+                raise Exception("Qwen API 返回了空内容")
+            
+            # 分块输出内容（用于前端流式显示）
             chunk_size = 100
-            for i in range(0, len(result_json), chunk_size):
-                chunk = result_json[i:i + chunk_size]
+            for i in range(0, len(content), chunk_size):
+                chunk = content[i:i + chunk_size]
                 yield f"data: {json.dumps({'type': 'content', 'content': chunk})}\n\n"
             
-            # 发送完成事件
-            yield f"data: {json.dumps({'type': 'complete', 'result': result.model_dump()})}\n\n"
+            # 检测是否为 JSON（两阶段工作流程）
+            if self._is_json_content(content):
+                # 第二阶段：JSON 配置
+                messages = [{"role": "user", "content": prompt_text}]
+                parsed_data = await self._parse_json_with_retry(messages, content)
+                result_obj = self._build_parse_result(parsed_data)
+                yield f"data: {json.dumps({'type': 'complete', 'result': result_obj.model_dump()})}\n\n"
+            else:
+                # 第一阶段：分析总结
+                logger.info("Qwen local: Detected summary output (non-JSON)")
+                yield f"data: {json.dumps({'type': 'summary', 'content': content})}\n\n"
             
         except Exception as e:
             logger.error(f"Qwen local stream parsing error: {e}")
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+    
+    def _extract_qwen_response_content(self, result: dict) -> str:
+        """从 Qwen API 响应中提取内容"""
+        content = None
+        if isinstance(result, dict):
+            actual_result = result
+            if "result" in result and isinstance(result["result"], dict):
+                actual_result = result["result"]
+            
+            if "choices" in actual_result and actual_result["choices"]:
+                choice = actual_result["choices"][0]
+                if isinstance(choice, dict):
+                    if "message" in choice and isinstance(choice["message"], dict):
+                        content = choice["message"].get("content", "")
+                    elif "text" in choice:
+                        content = choice["text"]
+            elif "response" in actual_result:
+                content = actual_result["response"]
+            elif "content" in actual_result:
+                content = actual_result["content"]
+            elif "text" in actual_result:
+                content = actual_result["text"]
+            elif "output" in actual_result:
+                content = actual_result["output"]
+            elif "data" in actual_result:
+                data_field = actual_result["data"]
+                if isinstance(data_field, str):
+                    content = data_field
+                elif isinstance(data_field, dict):
+                    content = data_field.get("content") or data_field.get("text") or json.dumps(data_field, ensure_ascii=False)
+            
+            if content is None:
+                content = json.dumps(actual_result, ensure_ascii=False)
+        elif isinstance(result, str):
+            content = result
+        else:
+            content = str(result)
+        
+        return content or ""
     
     async def parse_image_stream(
         self, 
@@ -471,19 +569,25 @@ class VLModelService:
                             # 非标准 SSE 格式，可能是直接返回的 JSON
                             logger.warning(f"Non-SSE line: {line[:100]}")
             
-            # 尝试解析完整的 JSON
+            # 检测输出是否为 JSON（两阶段工作流程）
             logger.debug(f"Accumulated content length: {len(accumulated_content)}")
             
-            try:
-                parsed_data = await self._parse_accumulated_content(messages, accumulated_content)
-                result = self._build_parse_result(parsed_data)
-                
-                # 发送完成事件
-                yield f"data: {json.dumps({'type': 'complete', 'result': result.model_dump()})}\n\n"
-                
-            except Exception as e:
-                logger.error(f"Failed to parse accumulated content: {e}")
-                yield f"data: {json.dumps({'type': 'error', 'message': f'解析失败: {str(e)}'})}\n\n"
+            # 尝试判断是否为 JSON 格式（第二阶段输出）
+            is_json_output = self._is_json_content(accumulated_content)
+            
+            if is_json_output:
+                # 第二阶段：输出是 JSON 配置，发送 complete 事件
+                try:
+                    parsed_data = await self._parse_accumulated_content(messages, accumulated_content)
+                    result = self._build_parse_result(parsed_data)
+                    yield f"data: {json.dumps({'type': 'complete', 'result': result.model_dump()})}\n\n"
+                except Exception as e:
+                    logger.error(f"Failed to parse JSON content: {e}")
+                    yield f"data: {json.dumps({'type': 'error', 'message': f'解析失败: {str(e)}'})}\n\n"
+            else:
+                # 第一阶段：输出是分析总结（自然语言），发送 summary 事件
+                logger.info("Detected summary output (non-JSON), sending summary event")
+                yield f"data: {json.dumps({'type': 'summary', 'content': accumulated_content})}\n\n"
                 
         except Exception as e:
             logger.error(f"Stream parsing error: {e}")
@@ -671,7 +775,103 @@ class VLModelService:
 """
     
     def _build_parse_result(self, data: dict) -> VLParseResult:
-        """构建解析结果对象"""
+        """构建解析结果对象，并验证按钮列表"""
+        logger.info(f"_build_parse_result called, available_buttons={self.available_buttons}")
+        logger.info(f"Raw button_list from AI: {data.get('button_list', [])}")
+        
+        # 单词级别的中英文翻译映射（用于组合翻译）
+        word_translation = {
+            # 动词/操作
+            "return": "返回", "go": "前往", "back": "返回", "forward": "前进",
+            "confirm": "确认", "cancel": "取消", "submit": "提交", "save": "保存",
+            "delete": "删除", "remove": "移除", "edit": "编辑", "add": "添加",
+            "clear": "清除", "reset": "重置", "refresh": "刷新", "exit": "退出",
+            "close": "关闭", "open": "打开", "start": "开始", "stop": "停止",
+            "search": "搜索", "query": "查询", "find": "查找", "filter": "筛选",
+            "select": "选择", "check": "勾选", "uncheck": "取消勾选",
+            "input": "输入", "enter": "输入", "type": "输入",
+            "print": "打印", "scan": "扫描", "upload": "上传", "download": "下载",
+            "sign": "签名", "verify": "验证", "authorize": "授权",
+            "transfer": "转账", "withdraw": "取款", "deposit": "存款",
+            "pay": "支付", "receive": "收款", "send": "发送",
+            "take": "拍摄", "retake": "重拍", "capture": "采集",
+            "call": "呼叫", "help": "帮助", "assist": "协助",
+            "view": "查看", "show": "显示", "hide": "隐藏",
+            "enable": "启用", "disable": "禁用",
+            "login": "登录", "logout": "登出", "register": "注册",
+            "update": "更新", "modify": "修改", "change": "更改",
+            "create": "创建", "new": "新建",
+            "copy": "复制", "paste": "粘贴", "cut": "剪切",
+            "undo": "撤销", "redo": "重做",
+            "report": "申报", "apply": "申请",
+            # 名词/对象
+            "home": "首页", "page": "页面", "screen": "屏幕",
+            "button": "按钮", "menu": "菜单", "list": "列表", "form": "表单",
+            "account": "账户", "user": "用户", "customer": "客户", "member": "会员",
+            "password": "密码", "pin": "密码", "code": "验证码",
+            "card": "卡片", "id": "证件", "identity": "身份",
+            "photo": "照片", "image": "图片", "picture": "图片",
+            "face": "人脸", "fingerprint": "指纹", "signature": "签名",
+            "document": "文档", "file": "文件", "record": "记录",
+            "transaction": "交易", "order": "订单", "bill": "账单",
+            "balance": "余额", "amount": "金额", "fee": "费用",
+            "date": "日期", "time": "时间", "period": "期限",
+            "name": "姓名", "phone": "电话", "email": "邮箱", "address": "地址",
+            "info": "信息", "information": "信息", "detail": "详情", "details": "详情",
+            "settings": "设置", "options": "选项", "preferences": "偏好",
+            "notification": "通知", "message": "消息", "alert": "提醒",
+            "error": "错误", "warning": "警告", "success": "成功",
+            "result": "结果", "status": "状态",
+            "assistant": "助手", "service": "服务", "support": "支持",
+            # 形容词/修饰词
+            "normal": "正常", "regular": "普通", "standard": "标准",
+            "loss": "挂失", "lost": "遗失", "missing": "丢失",
+            "new": "新", "old": "旧", "current": "当前", "previous": "上一", "next": "下一",
+            "first": "第一", "last": "最后", "all": "全部", "none": "无",
+            "more": "更多", "less": "更少",
+            "quick": "快速", "fast": "快速", "slow": "慢速",
+            "auto": "自动", "manual": "手动",
+            "valid": "有效", "invalid": "无效", "expired": "过期",
+            "active": "活跃", "inactive": "非活跃",
+            "online": "在线", "offline": "离线",
+            "personal": "个人", "business": "企业", "corporate": "公司",
+            # 业务专用词
+            "closure": "销户", "cancellation": "销户", "termination": "终止",
+            "activation": "激活", "deactivation": "停用",
+            "authorization": "授权", "authentication": "认证",
+            "recognition": "识别", "verification": "验证",
+            "registration": "注册", "enrollment": "登记",
+            "step": "步骤", "stage": "阶段", "process": "流程",
+            # 方位/位置
+            "left": "左", "right": "右", "up": "上", "down": "下",
+            "top": "顶部", "bottom": "底部", "center": "中心",
+            # 符号操作
+            "backspace": "退格", "space": "空格", "tab": "制表符",
+            "ok": "确定", "yes": "是", "no": "否",
+        }
+        
+        def get_button_names(btn_id: str, label: str = "") -> tuple:
+            """根据按钮 ID 获取中英文名称，通过逐词翻译实现"""
+            # 标准化 ID
+            normalized_id = btn_id.lower().replace("-", "_")
+            
+            # 生成英文名称：下划线转空格，首字母大写
+            en_name = btn_id.replace("_", " ").title()
+            
+            # 分割单词并逐个翻译生成中文名称
+            words = normalized_id.split("_")
+            zh_words = []
+            for word in words:
+                if word in word_translation:
+                    zh_words.append(word_translation[word])
+                else:
+                    # 未知单词保留原样（首字母大写）
+                    zh_words.append(word.title())
+            
+            zh_name = "".join(zh_words)
+            
+            return (zh_name, en_name)
+        
         elements = []
         for elem in data.get("elements", []):
             try:
@@ -679,23 +879,103 @@ class VLModelService:
             except Exception as e:
                 logger.warning(f"Failed to parse element: {elem}, error: {e}")
         
+        # 解析 AI 返回的未识别按钮
+        unrecognized_buttons = []
+        for btn in data.get("unrecognized_buttons", []):
+            try:
+                unrecognized_buttons.append(UnrecognizedButton(**btn))
+            except Exception as e:
+                logger.warning(f"Failed to parse unrecognized button: {btn}, error: {e}")
+        
+        # 获取 AI 返回的按钮列表
+        raw_button_list = data.get("button_list", [])
+        validated_button_list = []
+        
+        # 验证按钮列表：将系统中不存在的按钮移到 unrecognized_buttons
+        if self.available_buttons is not None:
+            for btn_id in raw_button_list:
+                if btn_id in self.available_buttons:
+                    validated_button_list.append(btn_id)
+                else:
+                    # 按钮不在系统中，添加到 unrecognized_buttons
+                    # 从 elements 中尝试找到对应的按钮信息
+                    btn_label = btn_id  # 默认使用 ID 作为名称
+                    btn_context = ""
+                    for elem in elements:
+                        if elem.element_id == btn_id or (hasattr(elem, 'label') and elem.label and btn_id in elem.label.lower().replace(' ', '_')):
+                            btn_label = elem.label or btn_id
+                            btn_context = elem.inferred_intent or ""
+                            break
+                    
+                    # 获取中英文名称
+                    name_zh, name_en = get_button_names(btn_id, btn_label)
+                    
+                    # 检查是否已经在 unrecognized_buttons 中
+                    already_exists = any(ub.suggested_id == btn_id for ub in unrecognized_buttons)
+                    if not already_exists:
+                        unrecognized_buttons.append(UnrecognizedButton(
+                            suggested_id=btn_id,
+                            suggested_name_zh=name_zh,
+                            suggested_name_en=name_en,
+                            context=btn_context
+                        ))
+                        logger.info(f"Button '{btn_id}' not in available buttons, moved to unrecognized_buttons (zh: {name_zh}, en: {name_en})")
+        else:
+            # 没有可用按钮列表，直接使用 AI 返回的列表
+            validated_button_list = raw_button_list
+        
         return VLParseResult(
             page_id=data.get("page_id"),
             page_name=data.get("page_name", {"zh-CN": "", "en": ""}),
             page_description=data.get("page_description", {"zh-CN": "", "en": ""}),
             elements=elements,
-            button_list=data.get("button_list", []),
+            button_list=validated_button_list,
             optional_actions=data.get("optional_actions", []),
+            unrecognized_buttons=unrecognized_buttons,
             ai_context=data.get("ai_context", {}),
             overall_confidence=data.get("overall_confidence", 0.5),
             clarification_needed=data.get("clarification_needed", False),
             clarification_questions=data.get("clarification_questions")
         )
 
+    def _is_json_content(self, content: str) -> bool:
+        """
+        检测内容是否为 JSON 格式
+        用于两阶段工作流程：判断是分析总结（自然语言）还是最终配置（JSON）
+        """
+        if not content or not content.strip():
+            return False
+        
+        cleaned = content.strip()
+        
+        # 去除可能的 markdown 代码块
+        if cleaned.startswith("```json"):
+            cleaned = cleaned[7:]
+        elif cleaned.startswith("```"):
+            cleaned = cleaned[3:]
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3]
+        cleaned = cleaned.strip()
+        
+        # 检查是否以 JSON 对象或数组开头
+        if not (cleaned.startswith("{") or cleaned.startswith("[")):
+            return False
+        
+        # 尝试解析 JSON
+        try:
+            json.loads(cleaned)
+            return True
+        except json.JSONDecodeError:
+            # 可能是不完整的 JSON 或格式有问题
+            # 如果以 { 开头并包含 "page_id" 等关键字，认为是 JSON
+            if cleaned.startswith("{") and '"page_id"' in cleaned:
+                return True
+            return False
+
     def _clean_json_content(self, content: str) -> str:
         """
-        清理 JSON 内容中的非法控制字符
-        处理模型输出中可能包含的未转义换行符等问题
+        清理 JSON 内容中的非法控制字符和格式问题
+        处理模型输出中可能包含的未转义换行符、反斜杠等问题
         """
         import re
         
@@ -709,32 +989,6 @@ class VLModelService:
             json_content = json_content[:-3]
         json_content = json_content.strip()
         
-        # 清理字符串值中的非法控制字符
-        # 这个正则表达式匹配 JSON 字符串值并替换其中的控制字符
-        def clean_string_value(match):
-            value = match.group(0)
-            # 替换未转义的控制字符
-            value = value.replace('\n', '\\n')
-            value = value.replace('\r', '\\r')
-            value = value.replace('\t', '\\t')
-            # 移除其他控制字符 (ASCII 0-31 除了已转义的)
-            cleaned = ''
-            i = 0
-            while i < len(value):
-                char = value[i]
-                if char == '\\' and i + 1 < len(value):
-                    # 保留合法的转义序列
-                    cleaned += char + value[i + 1]
-                    i += 2
-                elif ord(char) < 32 and char not in '\n\r\t':
-                    # 跳过非法控制字符
-                    i += 1
-                else:
-                    cleaned += char
-                    i += 1
-            return cleaned
-        
-        # 使用更简单的方法：直接替换字符串中的非法字符
         # 先尝试直接解析
         try:
             json.loads(json_content)
@@ -742,31 +996,38 @@ class VLModelService:
         except json.JSONDecodeError:
             pass
         
-        # 如果失败，清理控制字符
-        # 替换字符串值内的裸换行符为转义版本
-        # 这个正则匹配 "..." 字符串，处理其中的控制字符
+        # 如果失败，逐字符清理
         result = []
         in_string = False
-        escape_next = False
+        i = 0
         
-        for i, char in enumerate(json_content):
-            if escape_next:
-                result.append(char)
-                escape_next = False
-                continue
-                
-            if char == '\\' and in_string:
-                result.append(char)
-                escape_next = True
-                continue
-                
-            if char == '"' and not escape_next:
+        while i < len(json_content):
+            char = json_content[i]
+            
+            # 处理转义序列
+            if char == '\\' and in_string and i + 1 < len(json_content):
+                next_char = json_content[i + 1]
+                # 合法的转义字符
+                if next_char in '"\\bfnrtu/':
+                    result.append(char)
+                    result.append(next_char)
+                    i += 2
+                    continue
+                else:
+                    # 不合法的转义，转义反斜杠本身
+                    result.append('\\\\')
+                    i += 1
+                    continue
+            
+            # 处理引号（字符串边界）
+            if char == '"':
                 in_string = not in_string
                 result.append(char)
+                i += 1
                 continue
             
             if in_string:
-                # 在字符串内，替换控制字符
+                # 在字符串内，处理控制字符
                 if char == '\n':
                     result.append('\\n')
                 elif char == '\r':
@@ -775,15 +1036,32 @@ class VLModelService:
                     result.append('\\t')
                 elif ord(char) < 32:
                     # 跳过其他控制字符
-                    continue
+                    pass
                 else:
                     result.append(char)
             else:
                 # 在字符串外，保留换行和空白（JSON 允许）
                 result.append(char)
+            
+            i += 1
         
-        return ''.join(result)
-    
+        cleaned = ''.join(result)
+        
+        # 再次尝试解析，如果仍然失败，尝试更激进的修复
+        try:
+            json.loads(cleaned)
+            return cleaned
+        except json.JSONDecodeError:
+            # 尝试修复常见的 JSON 问题
+            # 1. 移除尾随逗号
+            cleaned = re.sub(r',\s*([\]\}])', r'\1', cleaned)
+            # 2. 确保属性名使用双引号
+            cleaned = re.sub(r"([{,]\s*)'([^']+)'\s*:", r'\1"\2":', cleaned)
+            # 3. 修复可能的编码问题
+            cleaned = cleaned.encode('utf-8', errors='ignore').decode('utf-8')
+            
+            return cleaned
+
     async def _parse_json_with_retry(self, messages: list, content: str) -> dict:
         """
         模型输出 JSON 解析失败时进行一次纠错重试

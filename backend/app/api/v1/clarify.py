@@ -68,7 +68,13 @@ async def submit_clarify_response(
     prompt_service = SystemPromptService(db)
     system_prompt = await prompt_service.get_current_prompt()
     selected_model = await prompt_service.get_selected_model()
-    vl_service = VLModelService(selected_model=selected_model)
+    
+    # 获取可用按钮列表，用于验证 AI 返回的按钮
+    from app.services.prompt_injector import PromptInjector
+    injector = PromptInjector(db)
+    available_buttons = await injector.get_available_button_ids()
+    
+    vl_service = VLModelService(selected_model=selected_model, available_buttons=available_buttons)
     
     # 更新澄清历史 (REQ-M3-014)
     clarify_history = session.clarify_history or []
@@ -254,7 +260,13 @@ async def chat_for_config_modification(
     prompt_service = SystemPromptService(db)
     system_prompt = await prompt_service.get_current_prompt()
     selected_model = await prompt_service.get_selected_model()
-    vl_service = VLModelService(selected_model=selected_model)
+    
+    # 获取可用按钮列表，用于验证 AI 返回的按钮
+    from app.services.prompt_injector import PromptInjector
+    injector = PromptInjector(db)
+    available_buttons = await injector.get_available_button_ids()
+    
+    vl_service = VLModelService(selected_model=selected_model, available_buttons=available_buttons)
     
     # 获取当前配置
     current_config = request.current_config or session.parse_result or {}
@@ -343,7 +355,13 @@ async def chat_for_config_modification_stream(
                 prompt_service = SystemPromptService(stream_db)
                 system_prompt = await prompt_service.get_current_prompt()
                 selected_model = await prompt_service.get_selected_model()
-                vl_service = VLModelService(selected_model=selected_model)
+                
+                # 获取可用按钮列表，用于验证 AI 返回的按钮
+                from app.services.prompt_injector import PromptInjector
+                injector = PromptInjector(stream_db)
+                available_buttons = await injector.get_available_button_ids()
+                
+                vl_service = VLModelService(selected_model=selected_model, available_buttons=available_buttons)
                 
                 # 更新澄清历史
                 new_history = clarify_history + [{

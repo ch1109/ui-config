@@ -26,6 +26,7 @@ from app.models.page_config import PageConfig
 from app.models.project import Project
 from app.services.vl_model_service import VLModelService
 from app.services.system_prompt_service import SystemPromptService
+from app.services.prompt_injector import inject_prompt
 from app.core.config import settings
 from app.core.exceptions import (
     InvalidFileTypeError, FileTooLargeError, ImageRequiredError,
@@ -193,6 +194,11 @@ async def trigger_ai_parse_stream(
     
     async def stream_generator():
         """流式生成器"""
+        import json as json_module
+        
+        # 首先发送包含 session_id 的初始化事件
+        yield f"data: {json_module.dumps({'type': 'init', 'session_id': session_id_str})}\n\n"
+        
         async with AsyncSessionLocal() as stream_db:
             try:
                 # 获取 System Prompt 和选择的模型
@@ -200,12 +206,20 @@ async def trigger_ai_parse_stream(
                 system_prompt = await prompt_service.get_current_prompt()
                 selected_model = await prompt_service.get_selected_model()
                 
-                # 调用 VL 模型流式接口 (使用选择的模型)
-                vl_service = VLModelService(selected_model=selected_model)
+                # 动态注入按钮列表和意图列表到 System Prompt
+                injected_prompt = await inject_prompt(stream_db, system_prompt.prompt_content)
+                
+                # 获取可用按钮列表，用于验证 AI 返回的按钮
+                from app.services.prompt_injector import PromptInjector
+                injector = PromptInjector(stream_db)
+                available_buttons = await injector.get_available_button_ids()
+                
+                # 调用 VL 模型流式接口 (使用选择的模型，传入可用按钮列表)
+                vl_service = VLModelService(selected_model=selected_model, available_buttons=available_buttons)
                 
                 async for chunk in vl_service.parse_image_stream(
                     image_url=image_url,
-                    system_prompt=system_prompt.prompt_content
+                    system_prompt=injected_prompt
                 ):
                     yield chunk
                 
@@ -270,14 +284,22 @@ async def execute_parse(session_id: str, image_url: str):
             system_prompt = await prompt_service.get_current_prompt()
             selected_model = await prompt_service.get_selected_model()
             
-            # 调用 VL 模型 (REQ-M2-004: 30秒超时，使用选择的模型)
-            vl_service = VLModelService(selected_model=selected_model)
+            # 动态注入按钮列表和意图列表到 System Prompt
+            injected_prompt = await inject_prompt(db, system_prompt.prompt_content)
+            
+            # 获取可用按钮列表，用于验证 AI 返回的按钮
+            from app.services.prompt_injector import PromptInjector
+            injector = PromptInjector(db)
+            available_buttons = await injector.get_available_button_ids()
+            
+            # 调用 VL 模型 (REQ-M2-004: 30秒超时，使用选择的模型，传入可用按钮列表)
+            vl_service = VLModelService(selected_model=selected_model, available_buttons=available_buttons)
             
             try:
                 parse_result = await asyncio.wait_for(
                     vl_service.parse_image(
                         image_url=image_url,
-                        system_prompt=system_prompt.prompt_content
+                        system_prompt=injected_prompt
                     ),
                     timeout=settings.VL_TIMEOUT
                 )

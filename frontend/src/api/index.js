@@ -98,6 +98,22 @@ export const projectApi = {
   delete: (projectId) => api.delete(`/projects/${projectId}`)
 }
 
+// Button API - 按钮管理
+export const buttonApi = {
+  // 获取按钮列表（包含选项格式）
+  list: (category = null) => api.get('/buttons', { params: { category } }),
+  // 获取单个按钮
+  get: (buttonId) => api.get(`/buttons/${buttonId}`),
+  // 创建新按钮
+  create: (data) => api.post('/buttons', data),
+  // 更新按钮
+  update: (buttonId, data) => api.put(`/buttons/${buttonId}`, data),
+  // 删除按钮
+  delete: (buttonId) => api.delete(`/buttons/${buttonId}`),
+  // 获取下拉选项列表（简化格式）
+  getOptions: () => api.get('/buttons/options/list')
+}
+
 // Page Config API
 export const pageConfigApi = {
   list: (params) => api.get('/pages', { params }),
@@ -161,8 +177,17 @@ export const pageConfigApi = {
   getParseStatus: (sessionId) => api.get(`/pages/parse/${sessionId}/status`),
   
   // AI 解析 - 流式输出 (使用 fetch 处理 SSE)
-  parseStream: (imageUrl, onMessage, onComplete, onError) => {
+  // 支持两阶段工作流程：
+  // - 第一阶段：AI 输出分析总结（自然语言），触发 onSummary 回调
+  // - 第二阶段：AI 输出 JSON 配置，触发 onComplete 回调
+  // 回调参数:
+  // - onMessage: 流式消息 { type, content/message }
+  // - onComplete: 第二阶段完成 (result)
+  // - onError: 错误 (message)
+  // - onSummary: 第一阶段完成 (content, sessionId)
+  parseStream: (imageUrl, onMessage, onComplete, onError, onSummary) => {
     const controller = new AbortController()
+    let sessionId = null  // 保存从 init 事件获取的 session_id
     
     fetch(`/api/v1/pages/parse-stream?image_url=${encodeURIComponent(imageUrl)}`, {
       method: 'GET',
@@ -200,12 +225,20 @@ export const pageConfigApi = {
             try {
               const data = JSON.parse(dataStr)
               
-              if (data.type === 'start') {
+              if (data.type === 'init') {
+                // 初始化事件，保存 session_id
+                sessionId = data.session_id
+              } else if (data.type === 'start') {
                 onMessage && onMessage({ type: 'start', message: data.message })
               } else if (data.type === 'content') {
                 onMessage && onMessage({ type: 'content', content: data.content })
+              } else if (data.type === 'summary') {
+                // 第一阶段完成：分析总结（自然语言）
+                onSummary && onSummary(data.content, sessionId)
+                return
               } else if (data.type === 'complete') {
-                onComplete && onComplete(data.result)
+                // 第二阶段完成：JSON 配置
+                onComplete && onComplete(data.result, sessionId)
                 return
               } else if (data.type === 'error') {
                 onError && onError(data.message)

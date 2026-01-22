@@ -144,6 +144,12 @@
           </svg>
         </div>
         <h3>页面能力</h3>
+        <button class="add-button-btn" @click="showAddButtonModal = true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 5v14M5 12h14"/>
+          </svg>
+          新增按钮
+        </button>
       </div>
       
       <!-- 可点击按钮 -->
@@ -162,8 +168,19 @@
         >
           <template #option="{ value, label }">
             <span class="option-item">
-              <span class="option-label">{{ label }}</span>
-              <span class="option-id">{{ value }}</span>
+              <span class="option-content">
+                <span class="option-label">{{ label }}</span>
+                <span class="option-id">{{ value }}</span>
+              </span>
+              <span 
+                class="option-delete-btn" 
+                @click.stop="handleDeleteButton(value, label)"
+                title="从系统中删除此按钮"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                </svg>
+              </span>
             </span>
           </template>
           <template #tagRender="{ value, closable, onClose }">
@@ -203,12 +220,126 @@
       </div>
     </section>
     
+    <!-- 新增按钮弹窗 -->
+    <a-modal
+      v-model:open="showAddButtonModal"
+      title="新增按钮"
+      :width="600"
+      :footer="null"
+      class="add-button-modal"
+      @cancel="resetAddButtonForm"
+    >
+      <div class="add-button-form">
+        <!-- 按钮 ID -->
+        <div class="modal-form-field">
+          <label>
+            按钮 ID（英文标识）
+            <span class="required">*</span>
+          </label>
+          <div class="input-with-action">
+            <input 
+              v-model="newButtonForm.button_id"
+              type="text"
+              class="form-input"
+              placeholder="例如: submit_form, cancel_order"
+            />
+            <button type="button" class="generate-btn" @click="generateButtonId">
+              生成
+            </button>
+          </div>
+          <span class="field-hint">只能包含字母、数字和下划线，使用 snake_case 格式</span>
+        </div>
+        
+        <!-- 按钮分类 -->
+        <div class="modal-form-field">
+          <label>按钮分类</label>
+          <a-select
+            v-model:value="newButtonForm.category"
+            class="form-select"
+            :options="categoryOptions"
+          />
+        </div>
+        
+        <!-- 语言选择 -->
+        <div class="modal-form-field">
+          <label>编辑语言</label>
+          <a-radio-group v-model:value="newButtonLanguage" button-style="solid" class="language-tabs">
+            <a-radio-button value="zh-CN">简体中文</a-radio-button>
+            <a-radio-button value="en">English</a-radio-button>
+          </a-radio-group>
+        </div>
+        
+        <!-- 按钮名称 -->
+        <div class="modal-form-field">
+          <label>
+            {{ newButtonLanguage === 'zh-CN' ? '按钮名称（简体中文）' : 'Button Name (English)' }}
+            <span class="required">*</span>
+          </label>
+          <input 
+            v-model="newButtonForm.name[newButtonLanguage]"
+            type="text"
+            class="form-input"
+            :placeholder="newButtonLanguage === 'zh-CN' ? '例如: 提交表单' : 'e.g. Submit Form'"
+          />
+        </div>
+        
+        <!-- 按钮描述 -->
+        <div class="modal-form-field">
+          <label>{{ newButtonLanguage === 'zh-CN' ? '按钮描述' : 'Description' }}</label>
+          <textarea 
+            v-model="newButtonForm.description[newButtonLanguage]"
+            class="form-textarea"
+            rows="2"
+            :placeholder="newButtonLanguage === 'zh-CN' ? '描述按钮的功能...' : 'Describe the button function...'"
+          ></textarea>
+        </div>
+        
+        <!-- 响应信息 -->
+        <div class="modal-form-field">
+          <label>{{ newButtonLanguage === 'zh-CN' ? '响应信息' : 'Response Info' }}</label>
+          <textarea 
+            v-model="newButtonForm.response_info[newButtonLanguage]"
+            class="form-textarea"
+            rows="2"
+            :placeholder="newButtonLanguage === 'zh-CN' ? '点击按钮后的提示信息...' : 'Message shown after clicking...'"
+          ></textarea>
+        </div>
+        
+        <!-- 语音关键词 -->
+        <div class="modal-form-field">
+          <label>语音关键词</label>
+          <textarea 
+            v-model="newButtonForm.voice_keywords_text"
+            class="form-textarea"
+            rows="2"
+            placeholder="每行一个关键词，例如:&#10;提交&#10;确定&#10;submit"
+          ></textarea>
+          <span class="field-hint">用于语音识别，每行一个关键词</span>
+        </div>
+        
+        <!-- 操作按钮 -->
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" @click="showAddButtonModal = false">
+            取消
+          </button>
+          <button 
+            type="button" 
+            class="btn-primary" 
+            :disabled="!canSubmitNewButton || isSubmittingButton"
+            @click="handleCreateButton"
+          >
+            {{ isSubmittingButton ? '保存中...' : '保存按钮' }}
+          </button>
+        </div>
+      </div>
+    </a-modal>
   </div>
 </template>
 
 <script setup>
 import { reactive, watch, onMounted, ref, computed } from 'vue'
 import { message } from 'ant-design-vue'
+import { buttonApi } from '@/api'
 
 const props = defineProps({
   config: {
@@ -226,6 +357,139 @@ const emit = defineEmits(['config-changed'])
 
 // 显示帮助提示
 const showDescriptionHelp = ref(false)
+
+// 新增按钮弹窗状态
+const showAddButtonModal = ref(false)
+const newButtonLanguage = ref('zh-CN')
+const isSubmittingButton = ref(false)
+
+// 新增按钮表单
+const newButtonForm = reactive({
+  button_id: '',
+  category: 'operation',
+  name: { 'zh-CN': '', en: '' },
+  description: { 'zh-CN': '', en: '' },
+  response_info: { 'zh-CN': '', en: '' },
+  voice_keywords_text: ''
+})
+
+// 按钮分类选项
+const categoryOptions = [
+  { value: 'operation', label: '操作按钮' },
+  { value: 'function', label: '功能按钮' },
+  { value: 'navigation', label: '导航按钮' },
+  { value: 'input_trigger', label: '输入触发按钮' },
+  { value: 'selection', label: '选择按钮' }
+]
+
+// 是否可以提交新按钮
+const canSubmitNewButton = computed(() => {
+  return newButtonForm.button_id.trim() !== '' && 
+         newButtonForm.name['zh-CN'].trim() !== ''
+})
+
+// 生成按钮 ID
+const generateButtonId = () => {
+  const zhName = newButtonForm.name['zh-CN']
+  if (zhName) {
+    // 简单转换：如果有英文名称则使用英文，否则用时间戳
+    const enName = newButtonForm.name['en']
+    if (enName) {
+      newButtonForm.button_id = enName.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '')
+    } else {
+      newButtonForm.button_id = `btn_${Date.now().toString(36)}`
+    }
+  } else {
+    newButtonForm.button_id = `btn_${Date.now().toString(36)}`
+  }
+}
+
+// 重置新增按钮表单
+const resetAddButtonForm = () => {
+  newButtonForm.button_id = ''
+  newButtonForm.category = 'operation'
+  newButtonForm.name = { 'zh-CN': '', en: '' }
+  newButtonForm.description = { 'zh-CN': '', en: '' }
+  newButtonForm.response_info = { 'zh-CN': '', en: '' }
+  newButtonForm.voice_keywords_text = ''
+  newButtonLanguage.value = 'zh-CN'
+}
+
+// 创建新按钮
+const handleCreateButton = async () => {
+  if (!canSubmitNewButton.value) return
+  
+  isSubmittingButton.value = true
+  try {
+    const voiceKeywords = newButtonForm.voice_keywords_text
+      .split('\n')
+      .map(k => k.trim())
+      .filter(k => k !== '')
+    
+    await buttonApi.create({
+      button_id: newButtonForm.button_id,
+      name: newButtonForm.name,
+      description: newButtonForm.description,
+      response_info: newButtonForm.response_info,
+      voice_keywords: voiceKeywords,
+      category: newButtonForm.category
+    })
+    
+    message.success('按钮创建成功')
+    showAddButtonModal.value = false
+    resetAddButtonForm()
+    
+    // 重新加载按钮列表
+    await loadButtonOptions()
+  } catch (error) {
+    const errorMsg = error.response?.data?.detail || error.message || '创建失败'
+    message.error(errorMsg)
+  } finally {
+    isSubmittingButton.value = false
+  }
+}
+
+// 动态按钮选项（从 API 获取）
+const buttonOptions = ref([])
+const isLoadingButtons = ref(false)
+
+// 加载按钮选项
+const loadButtonOptions = async () => {
+  isLoadingButtons.value = true
+  try {
+    const response = await buttonApi.list()
+    buttonOptions.value = response.options || []
+  } catch (error) {
+    console.error('加载按钮列表失败:', error)
+    // 加载失败时使用空列表
+    buttonOptions.value = []
+  } finally {
+    isLoadingButtons.value = false
+  }
+}
+
+// 删除按钮
+const handleDeleteButton = async (buttonId, buttonLabel) => {
+  // 确认删除
+  const confirmed = window.confirm(`确定要从系统中删除按钮「${buttonLabel}」吗？\n\n注意：删除后将无法恢复，且所有使用此按钮的页面配置需要重新选择。`)
+  if (!confirmed) return
+  
+  try {
+    await buttonApi.delete(buttonId)
+    message.success(`按钮「${buttonLabel}」已删除`)
+    
+    // 从当前选中列表中移除该按钮
+    if (localConfig.button_list?.includes(buttonId)) {
+      localConfig.button_list = localConfig.button_list.filter(id => id !== buttonId)
+    }
+    
+    // 重新加载按钮列表
+    await loadButtonOptions()
+  } catch (error) {
+    const errorMsg = error.response?.data?.detail || error.message || '删除失败'
+    message.error(errorMsg)
+  }
+}
 
 // 已选语言列表（多选，默认中文和英文）
 const selectedLanguages = ref(['zh-CN', 'en'])
@@ -337,35 +601,6 @@ AI 在此页面应遵循的约束...
 用户在此页面的主要目标...`
 })
 
-// 按钮选项（分组）
-const buttonOptions = [
-  // 操作按钮
-  { value: 'confirm', label: '确认 (confirm)' },
-  { value: 'cancel', label: '取消 (cancel)' },
-  { value: 'previous_page', label: '上一页 (previous_page)' },
-  { value: 'next_page', label: '下一页 (next_page)' },
-  { value: 'print', label: '打印 (print)' },
-  { value: 'exit', label: '退出 (exit)' },
-  // 功能按钮
-  { value: 'take_photo', label: '拍照 (take_photo)' },
-  { value: 'retake', label: '重拍 (retake)' },
-  { value: 'search', label: '搜索 (search)' },
-  { value: 'check_authorization', label: '勾选授权 (check_authorization)' },
-  { value: 'fingerprint_authorization', label: '指纹授权 (fingerprint_authorization)' },
-  { value: 'forgot_password', label: '忘记密码 (forgot_password)' },
-  { value: 'correct_password', label: '更正密码 (correct_password)' },
-  // 导航按钮
-  { value: 'return_home', label: '返回首页 (return_home)' },
-  { value: 'next_step', label: '下一步 (next_step)' },
-  { value: 'previous_step', label: '上一步 (previous_step)' },
-  // 输入触发按钮
-  { value: 'input_password', label: '输入密码 (input_password)' },
-  { value: 'click_signature', label: '点击签名 (click_signature)' },
-  { value: 'signature_modify_confirm', label: '签名修改/确认 (signature_modify_confirm)' },
-  { value: 'click_search', label: '点击搜索 (click_search)' },
-  { value: 'click_authorization', label: '点击授权 (click_authorization)' }
-]
-
 // 意图选项（硬编码，后续对接 API）
 const intentOptions = [
   { value: 'knowledge', label: '知识问答 (knowledge)' },
@@ -376,21 +611,20 @@ const intentOptions = [
   { value: 'UpdateFormCancelAccount', label: '更新转账表单 (UpdateFormCancelAccount)' }
 ]
 
-// 按钮 ID 到中文标签的映射
-const buttonLabelMap = buttonOptions.reduce((acc, opt) => {
-  acc[opt.value] = opt.label.split(' (')[0]
-  return acc
-}, {})
-
 // 意图 ID 到中文标签的映射
 const intentLabelMap = intentOptions.reduce((acc, opt) => {
   acc[opt.value] = opt.label.split(' (')[0]
   return acc
 }, {})
 
-// 获取按钮标签
+// 获取按钮标签（动态从 buttonOptions 获取）
 const getButtonLabel = (value) => {
-  return buttonLabelMap[value] || value
+  const option = buttonOptions.value.find(opt => opt.value === value)
+  if (option) {
+    // 从 label 中提取中文名称（格式: "中文名 (english_id)"）
+    return option.label.split(' (')[0]
+  }
+  return value
 }
 
 // 获取意图标签
@@ -408,8 +642,10 @@ const localConfig = reactive({
 })
 
 // 初始化
-onMounted(() => {
+onMounted(async () => {
   syncFromProps()
+  // 加载按钮选项
+  await loadButtonOptions()
 })
 
 // 监听 props 变化
@@ -494,6 +730,11 @@ const handleActionChange = (value) => {
 const handleTranslate = () => {
   message.info('翻译功能开发中...')
 }
+
+// 暴露方法给父组件
+defineExpose({
+  loadButtonOptions
+})
 </script>
 
 <style lang="scss" scoped>
@@ -524,6 +765,33 @@ const handleTranslate = () => {
     font-weight: 600;
     color: var(--text-heading);
     margin: 0;
+    flex: 1;
+  }
+}
+
+// 新增按钮按钮
+.add-button-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--primary);
+  background: var(--primary-light);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  
+  svg {
+    width: 14px;
+    height: 14px;
+  }
+  
+  &:hover {
+    background: var(--primary);
+    color: white;
   }
 }
 
@@ -910,6 +1178,15 @@ const handleTranslate = () => {
   align-items: center;
   justify-content: space-between;
   width: 100%;
+  gap: 8px;
+  
+  .option-content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex: 1;
+    min-width: 0;
+  }
   
   .option-label {
     font-size: 14px;
@@ -920,6 +1197,144 @@ const handleTranslate = () => {
     font-size: 12px;
     color: var(--text-muted);
     font-family: var(--font-mono, monospace);
+  }
+  
+  .option-delete-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+    
+    svg {
+      width: 14px;
+      height: 14px;
+    }
+    
+    &:hover {
+      background: #fee2e2;
+      color: #dc2626;
+    }
+  }
+}
+
+// 新增按钮弹窗样式
+.add-button-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.modal-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  
+  label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    
+    .required {
+      color: var(--error);
+      margin-left: 2px;
+    }
+  }
+}
+
+.input-with-action {
+  display: flex;
+  gap: 8px;
+  
+  .form-input {
+    flex: 1;
+  }
+}
+
+.generate-btn {
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+  
+  &:hover {
+    background: var(--bg-elevated);
+    color: var(--primary);
+    border-color: var(--primary);
+  }
+}
+
+.form-select {
+  width: 100%;
+  
+  :deep(.ant-select-selector) {
+    height: 40px !important;
+    border-radius: 10px !important;
+    border-color: var(--border-color) !important;
+    background: var(--bg-elevated) !important;
+  }
+  
+  :deep(.ant-select-selection-item) {
+    line-height: 38px !important;
+  }
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color);
+}
+
+.btn-secondary {
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+  
+  &:hover {
+    background: var(--bg-subtle);
+    color: var(--text-primary);
+  }
+}
+
+.btn-primary {
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  color: white;
+  background: var(--primary);
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+  
+  &:hover:not(:disabled) {
+    background: var(--primary-dark, #4f46e5);
+    transform: translateY(-1px);
+  }
+  
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 }
 </style>

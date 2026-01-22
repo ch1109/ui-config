@@ -25,7 +25,7 @@ from app.core.exceptions import (
 from app.database import init_db, close_db
 
 # 导入路由
-from app.api.v1 import system_prompt, project, page_config, clarify, config_generator, mcp, mcp_test, mcp_context, mcp_host
+from app.api.v1 import system_prompt, project, page_config, clarify, config_generator, mcp, mcp_test, mcp_context, mcp_host, button
 
 # 导入 Host 相关服务
 from app.services.human_in_loop import human_in_loop_service
@@ -111,6 +111,7 @@ app.include_router(mcp.router)
 app.include_router(mcp_test.router)
 app.include_router(mcp_context.router)
 app.include_router(mcp_host.router)  # MCP Host 完整功能
+app.include_router(button.router)  # 按钮管理
 
 
 @app.get("/")

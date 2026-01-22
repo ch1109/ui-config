@@ -16,6 +16,14 @@ class ParsedElement(BaseModel):
     confidence: float = Field(ge=0, le=1)
 
 
+class UnrecognizedButton(BaseModel):
+    """AI 识别到的未注册按钮"""
+    suggested_id: str = Field(..., description="建议的按钮 ID（snake_case 格式）")
+    suggested_name_zh: str = Field(..., description="建议的中文名称")
+    suggested_name_en: Optional[str] = Field(default="", description="建议的英文名称")
+    context: Optional[str] = Field(default="", description="按钮所在的上下文描述")
+
+
 class VLParseResult(BaseModel):
     """VL 模型解析结果"""
     page_id: Optional[str] = None  # 页面英文标识，如 "4.1face_authorization_page"
@@ -24,6 +32,10 @@ class VLParseResult(BaseModel):
     elements: List[ParsedElement] = []
     button_list: List[str] = []
     optional_actions: List[str] = []
+    unrecognized_buttons: List[UnrecognizedButton] = Field(
+        default=[],
+        description="AI 识别到但不在系统按钮列表中的按钮"
+    )
     ai_context: Dict[str, str] = {}
     overall_confidence: float = Field(ge=0, le=1)
     clarification_needed: bool = False

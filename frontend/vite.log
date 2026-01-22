@@ -130,3 +130,92 @@ DEPRECATION WARNING [legacy-js-api]: The legacy JS API is deprecated and will be
 
 More info: https://sass-lang.com/d/legacy-js-api
 
+6:48:19 PM [vite] hmr update /src/views/PageList.vue, /src/views/PageEditor.vue, /src/components/PageConfig/ImageUploader.vue, /src/components/AIAssistant/ClarifyPanel.vue, /src/views/MCPHostPage.vue, /src/components/MCPHost/ChatPanel.vue, /src/views/SystemPromptConfig.vue, /src/views/MCPManager.vue, /src/views/SamplingPage.vue
+6:48:41 PM [vite] hmr update /src/components/PageConfig/ConfigEditor.vue
+DEPRECATION WARNING [legacy-js-api]: The legacy JS API is deprecated and will be removed in Dart Sass 2.0.0.
+
+More info: https://sass-lang.com/d/legacy-js-api
+
+9:40:11 AM [vite] hmr update /src/views/PageList.vue, /src/views/PageEditor.vue, /src/components/PageConfig/ImageUploader.vue, /src/components/AIAssistant/ClarifyPanel.vue, /src/views/MCPHostPage.vue, /src/components/MCPHost/ChatPanel.vue, /src/views/SystemPromptConfig.vue, /src/views/MCPManager.vue, /src/views/SamplingPage.vue
+DEPRECATION WARNING [legacy-js-api]: The legacy JS API is deprecated and will be removed in Dart Sass 2.0.0.
+
+More info: https://sass-lang.com/d/legacy-js-api
+
+9:40:31 AM [vite] hmr update /src/views/PageList.vue, /src/views/PageEditor.vue, /src/components/PageConfig/ImageUploader.vue, /src/components/AIAssistant/ClarifyPanel.vue, /src/views/MCPHostPage.vue, /src/components/MCPHost/ChatPanel.vue, /src/views/SystemPromptConfig.vue, /src/views/MCPManager.vue, /src/views/SamplingPage.vue
+9:40:48 AM [vite] hmr update /src/views/PageList.vue, /src/views/PageEditor.vue, /src/components/PageConfig/ImageUploader.vue, /src/components/AIAssistant/ClarifyPanel.vue, /src/views/MCPHostPage.vue, /src/components/MCPHost/ChatPanel.vue, /src/views/SystemPromptConfig.vue, /src/views/MCPManager.vue, /src/views/SamplingPage.vue
+9:41:16 AM [vite] hmr update /src/views/PageList.vue, /src/views/PageEditor.vue, /src/components/PageConfig/ImageUploader.vue, /src/components/AIAssistant/ClarifyPanel.vue, /src/views/MCPHostPage.vue, /src/components/MCPHost/ChatPanel.vue, /src/views/SystemPromptConfig.vue, /src/views/MCPManager.vue, /src/views/SamplingPage.vue
+9:42:02 AM [vite] hmr update /src/components/PageConfig/ConfigEditor.vue
+DEPRECATION WARNING [legacy-js-api]: The legacy JS API is deprecated and will be removed in Dart Sass 2.0.0.
+
+More info: https://sass-lang.com/d/legacy-js-api
+
+9:42:31 AM [vite] hmr update /src/components/PageConfig/ConfigEditor.vue
+DEPRECATION WARNING [legacy-js-api]: The legacy JS API is deprecated and will be removed in Dart Sass 2.0.0.
+
+More info: https://sass-lang.com/d/legacy-js-api
+
+9:42:39 AM [vite] hmr update /src/components/PageConfig/ConfigEditor.vue
+DEPRECATION WARNING [legacy-js-api]: The legacy JS API is deprecated and will be removed in Dart Sass 2.0.0.
+
+More info: https://sass-lang.com/d/legacy-js-api
+
+9:42:44 AM [vite] hmr update /src/components/PageConfig/ConfigEditor.vue
+DEPRECATION WARNING [legacy-js-api]: The legacy JS API is deprecated and will be removed in Dart Sass 2.0.0.
+
+More info: https://sass-lang.com/d/legacy-js-api
+
+9:42:53 AM [vite] hmr update /src/components/PageConfig/ConfigEditor.vue?vue&type=style&index=0&scoped=d7874366&lang.scss
+DEPRECATION WARNING [legacy-js-api]: The legacy JS API is deprecated and will be removed in Dart Sass 2.0.0.
+
+More info: https://sass-lang.com/d/legacy-js-api
+
+9:43:09 AM [vite] hmr update /src/components/PageConfig/ConfigEditor.vue?vue&type=style&index=0&scoped=d7874366&lang.scss
+DEPRECATION WARNING [legacy-js-api]: The legacy JS API is deprecated and will be removed in Dart Sass 2.0.0.
+
+More info: https://sass-lang.com/d/legacy-js-api
+
+9:43:44 AM [vite] hmr update /src/components/AIAssistant/ClarifyPanel.vue
+DEPRECATION WARNING [legacy-js-api]: The legacy JS API is deprecated and will be removed in Dart Sass 2.0.0.
+
+More info: https://sass-lang.com/d/legacy-js-api
+
+9:43:55 AM [vite] hmr update /src/components/AIAssistant/ClarifyPanel.vue
+DEPRECATION WARNING [legacy-js-api]: The legacy JS API is deprecated and will be removed in Dart Sass 2.0.0.
+
+More info: https://sass-lang.com/d/legacy-js-api
+
+9:44:09 AM [vite] hmr update /src/components/AIAssistant/ClarifyPanel.vue
+DEPRECATION WARNING [legacy-js-api]: The legacy JS API is deprecated and will be removed in Dart Sass 2.0.0.
+
+More info: https://sass-lang.com/d/legacy-js-api
+
+9:44:20 AM [vite] hmr update /src/components/AIAssistant/ClarifyPanel.vue?vue&type=style&index=0&scoped=528ee09c&lang.scss
+DEPRECATION WARNING [legacy-js-api]: The legacy JS API is deprecated and will be removed in Dart Sass 2.0.0.
+
+More info: https://sass-lang.com/d/legacy-js-api
+
+9:48:30 AM [vite] hmr update /src/views/PageEditor.vue
+DEPRECATION WARNING [legacy-js-api]: The legacy JS API is deprecated and will be removed in Dart Sass 2.0.0.
+
+More info: https://sass-lang.com/d/legacy-js-api
+
+9:48:46 AM [vite] hmr update /src/components/PageConfig/ConfigEditor.vue
+DEPRECATION WARNING [legacy-js-api]: The legacy JS API is deprecated and will be removed in Dart Sass 2.0.0.
+
+More info: https://sass-lang.com/d/legacy-js-api
+
+9:48:51 AM [vite] hmr update /src/views/PageEditor.vue
+DEPRECATION WARNING [legacy-js-api]: The legacy JS API is deprecated and will be removed in Dart Sass 2.0.0.
+
+More info: https://sass-lang.com/d/legacy-js-api
+
+9:49:01 AM [vite] hmr update /src/views/PageEditor.vue
+DEPRECATION WARNING [legacy-js-api]: The legacy JS API is deprecated and will be removed in Dart Sass 2.0.0.
+
+More info: https://sass-lang.com/d/legacy-js-api
+
+9:49:13 AM [vite] hmr update /src/views/PageEditor.vue
+DEPRECATION WARNING [legacy-js-api]: The legacy JS API is deprecated and will be removed in Dart Sass 2.0.0.
+
+More info: https://sass-lang.com/d/legacy-js-api
+

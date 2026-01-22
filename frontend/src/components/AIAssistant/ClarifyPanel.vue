@@ -78,6 +78,20 @@
         </div>
       </div>
       
+      <!-- Summary State (第一阶段完成：分析总结) -->
+      <div v-if="status === 'summarized' && summaryContent" class="message assistant">
+        <div class="bubble-wrapper">
+          <div class="avatar small">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2a2 2 0 012 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 017 7h1a1 1 0 110 2h-1.07A7 7 0 0113 23a7 7 0 01-7.07-7H5a1 1 0 110-2h1a7 7 0 017-7h1V5.73A2 2 0 0112 2z"/>
+            </svg>
+          </div>
+          <div class="bubble summary-bubble">
+            <pre class="summary-content">{{ summaryContent }}</pre>
+          </div>
+        </div>
+      </div>
+      
       <!-- Loading -->
       <div v-if="isLoading" class="message assistant">
         <div class="bubble-wrapper">
@@ -153,6 +167,58 @@
           </div>
         </div>
       </template>
+      
+      <!-- 未识别按钮提示 - 独立于配置预览，只要有未识别按钮就显示 -->
+      <div v-if="pendingConfig?.unrecognized_buttons?.length > 0" class="message assistant">
+        <div class="bubble-wrapper">
+          <div class="avatar small">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2a2 2 0 012 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 017 7h1a1 1 0 110 2h-1.07A7 7 0 0113 23a7 7 0 01-7.07-7H5a1 1 0 110-2h1a7 7 0 017-7h1V5.73A2 2 0 0112 2z"/>
+            </svg>
+          </div>
+          <div class="bubble unrecognized-buttons-card">
+            <div class="card-header warning">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="8" x2="12" y2="12"/>
+                <line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+              发现新按钮
+            </div>
+            <p class="card-desc">我在图片中识别到了以下按钮，但它们尚未添加到系统中：</p>
+            
+            <div class="unrecognized-list">
+              <div 
+                v-for="btn in pendingConfig.unrecognized_buttons" 
+                :key="btn.suggested_id"
+                class="unrecognized-item"
+              >
+                <div class="item-info">
+                  <span class="item-name">{{ btn.suggested_name_zh }}</span>
+                  <span class="item-id">{{ btn.suggested_id }}</span>
+                  <span v-if="btn.context" class="item-context">{{ btn.context }}</span>
+                </div>
+                <button 
+                  class="add-btn" 
+                  :disabled="addedButtons.includes(btn.suggested_id)"
+                  @click="handleAddUnrecognizedButton(btn)"
+                >
+                  {{ addedButtons.includes(btn.suggested_id) ? '已添加' : '添加' }}
+                </button>
+              </div>
+            </div>
+            
+            <div class="card-actions">
+              <button class="action-btn secondary" @click="dismissUnrecognizedButtons">
+                忽略这些按钮
+              </button>
+              <button class="action-btn primary" @click="handleAddAllUnrecognizedButtons">
+                全部添加
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
       
       <!-- Clarification Question -->
       <template v-if="currentQuestion && status === 'clarifying'">
@@ -247,7 +313,8 @@
 
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue'
-import { clarifyApi, pageConfigApi } from '@/api'
+import { clarifyApi, pageConfigApi, buttonApi } from '@/api'
+import { message } from 'ant-design-vue'
 
 const props = defineProps({
   sessionId: String,
@@ -255,10 +322,11 @@ const props = defineProps({
   status: String,
   currentConfig: Object,
   imageUrl: String,
-  streamingContent: String
+  streamingContent: String,
+  summaryContent: String  // 第一阶段：分析总结内容
 })
 
-const emit = defineEmits(['config-updated', 'config-confirmed', 'completed'])
+const emit = defineEmits(['config-updated', 'config-confirmed', 'completed', 'button-added'])
 
 const chatHistory = ref([])
 const currentQuestion = ref(null)
@@ -272,10 +340,15 @@ const showConfigPreview = ref(false)
 const pendingConfig = ref(null)
 const configConfirmed = ref(false)
 
+// 未识别按钮相关状态
+const addedButtons = ref([])
+const isAddingButton = ref(false)
+
 const statusText = computed(() => {
   const map = {
     pending: '等待中',
     parsing: '分析中...',
+    summarized: '待确认',  // 第一阶段完成，等待用户确认
     clarifying: '对话中',
     completed: '已完成',
     failed: '失败'
@@ -306,6 +379,12 @@ watch(() => props.status, (newStatus, oldStatus) => {
     })
     configConfirmed.value = false
     showConfigPreview.value = false
+    scrollToBottom()
+  }
+  
+  // 第一阶段完成：分析总结
+  if (newStatus === 'summarized' && oldStatus === 'parsing') {
+    // 分析总结通过 summaryContent prop 直接显示，不需要添加到 chatHistory
     scrollToBottom()
   }
   
@@ -420,7 +499,8 @@ const sendMessage = async () => {
   isLoading.value = true
   
   try {
-    if (props.sessionId && (props.status === 'clarifying' || props.status === 'completed')) {
+    // 支持在 summarized、clarifying、completed 状态下发送消息
+    if (props.sessionId && (props.status === 'summarized' || props.status === 'clarifying' || props.status === 'completed')) {
       let accumulatedContent = ''
       const aiMessageIndex = chatHistory.value.length
       chatHistory.value.push({
@@ -485,6 +565,119 @@ const sendMessage = async () => {
 const selectOption = (option) => {
   inputText.value = option
   sendMessage()
+}
+
+// 处理添加单个未识别的按钮
+const handleAddUnrecognizedButton = async (btn) => {
+  if (isAddingButton.value || addedButtons.value.includes(btn.suggested_id)) return
+  
+  isAddingButton.value = true
+  try {
+    await buttonApi.create({
+      button_id: btn.suggested_id,
+      name: { 
+        'zh-CN': btn.suggested_name_zh, 
+        en: btn.suggested_name_en || '' 
+      },
+      description: { 
+        'zh-CN': btn.context || '', 
+        en: '' 
+      },
+      response_info: {},
+      voice_keywords: [],
+      category: 'operation'
+    })
+    
+    addedButtons.value.push(btn.suggested_id)
+    
+    // 将新按钮添加到 pendingConfig.button_list，确保确认应用时能包含该按钮
+    if (pendingConfig.value && !pendingConfig.value.button_list?.includes(btn.suggested_id)) {
+      if (!pendingConfig.value.button_list) {
+        pendingConfig.value.button_list = []
+      }
+      pendingConfig.value.button_list.push(btn.suggested_id)
+    }
+    
+    message.success(`按钮 "${btn.suggested_name_zh}" 添加成功`)
+    
+    // 触发事件通知父组件刷新按钮列表
+    emit('button-added', btn)
+  } catch (error) {
+    const errorMsg = error.response?.data?.detail || error.message || '添加失败'
+    message.error(errorMsg)
+  } finally {
+    isAddingButton.value = false
+  }
+}
+
+// 处理添加所有未识别的按钮
+const handleAddAllUnrecognizedButtons = async () => {
+  if (!pendingConfig.value?.unrecognized_buttons?.length) return
+  
+  const buttonsToAdd = pendingConfig.value.unrecognized_buttons.filter(
+    btn => !addedButtons.value.includes(btn.suggested_id)
+  )
+  
+  if (buttonsToAdd.length === 0) {
+    message.info('所有按钮已添加')
+    return
+  }
+  
+  isAddingButton.value = true
+  let successCount = 0
+  
+  for (const btn of buttonsToAdd) {
+    try {
+      await buttonApi.create({
+        button_id: btn.suggested_id,
+        name: { 
+          'zh-CN': btn.suggested_name_zh, 
+          en: btn.suggested_name_en || '' 
+        },
+        description: { 
+          'zh-CN': btn.context || '', 
+          en: '' 
+        },
+        response_info: {},
+        voice_keywords: [],
+        category: 'operation'
+      })
+      
+      addedButtons.value.push(btn.suggested_id)
+      
+      // 将新按钮添加到 pendingConfig.button_list，确保确认应用时能包含该按钮
+      if (pendingConfig.value && !pendingConfig.value.button_list?.includes(btn.suggested_id)) {
+        if (!pendingConfig.value.button_list) {
+          pendingConfig.value.button_list = []
+        }
+        pendingConfig.value.button_list.push(btn.suggested_id)
+      }
+      
+      successCount++
+      emit('button-added', btn)
+    } catch (error) {
+      console.error(`添加按钮 ${btn.suggested_id} 失败:`, error)
+    }
+  }
+  
+  isAddingButton.value = false
+  
+  if (successCount > 0) {
+    message.success(`成功添加 ${successCount} 个按钮`)
+  }
+}
+
+// 忽略未识别的按钮
+const dismissUnrecognizedButtons = () => {
+  if (pendingConfig.value) {
+    pendingConfig.value.unrecognized_buttons = []
+  }
+  chatHistory.value.push({
+    role: 'assistant',
+    content: '好的，已忽略这些新按钮。如果之后需要添加，可以在"页面能力"区域点击"新增按钮"手动添加。',
+    timestamp: new Date()
+  })
+  scrollToBottom()
 }
 
 const scrollToBottom = () => {
@@ -583,6 +776,12 @@ const formatTime = (date) => {
     background: var(--primary-light);
     color: var(--primary);
     .status-dot { background: var(--primary); animation: pulse 1.5s infinite; }
+  }
+  
+  &.summarized {
+    background: var(--accent-light, #fef3c7);
+    color: var(--accent, #d97706);
+    .status-dot { background: var(--accent, #f59e0b); animation: pulse 1.5s infinite; }
   }
   
   &.clarifying {
@@ -869,6 +1068,24 @@ const formatTime = (date) => {
   word-break: break-all;
 }
 
+// 分析总结样式
+.summary-bubble {
+  max-width: 100%;
+  width: 100%;
+  background: linear-gradient(135deg, var(--bg-elevated) 0%, var(--bg-subtle) 100%) !important;
+  border: 1px solid var(--primary-light) !important;
+}
+
+.summary-content {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.8;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-primary);
+}
+
 .streaming-cursor {
   animation: blink 1s infinite;
   color: var(--primary);
@@ -1032,5 +1249,106 @@ const formatTime = (date) => {
   color: var(--text-muted);
   margin-top: 8px;
   text-align: center;
+}
+
+// 未识别按钮卡片样式
+.unrecognized-buttons-card {
+  max-width: 100%;
+  width: 100%;
+  
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    
+    svg {
+      width: 18px;
+      height: 18px;
+    }
+    
+    &.warning {
+      color: #b45309;
+    }
+  }
+  
+  .card-desc {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin: 0 0 16px 0;
+  }
+}
+
+.unrecognized-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.unrecognized-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--bg-subtle);
+  border-radius: 8px;
+  border: 1px solid var(--border-light);
+  
+  .item-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  
+  .item-name {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-heading);
+  }
+  
+  .item-id {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: var(--font-mono, monospace);
+  }
+  
+  .item-context {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+  
+  .add-btn {
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--primary);
+    background: var(--primary-light);
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+    
+    &:hover:not(:disabled) {
+      background: var(--primary);
+      color: white;
+    }
+    
+    &:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      background: var(--success-light);
+      color: var(--success);
+    }
+  }
+}
+
+.card-actions {
+  display: flex;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-light);
 }
 </style>
